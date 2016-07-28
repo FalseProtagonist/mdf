@@ -1,6 +1,7 @@
 *.pyc
 *.pyd
 *.c
+*.so
 *.h
 .idea
 *.ipynb
