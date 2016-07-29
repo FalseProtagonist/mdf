@@ -107,7 +107,7 @@ def _to_dot(ctx,
 
         package = (node.modulename or "")
         name = ("cluster_%d_%s" % (ctx._id, _get_short_name(package, "p")))
-        label = _escape_node_label(package)
+        label = _escape_node_label(name)
         subgraphs.append((name, label, colors["module0"]))
 
         parent = sub_graph = root
