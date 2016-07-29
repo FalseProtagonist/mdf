@@ -7,3 +7,4 @@
 *.ipynb
 build
 mdf.egg-info
+.cache
