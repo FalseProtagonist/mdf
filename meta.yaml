@@ -5,7 +5,7 @@ package:
   version: {{ version }}
 
 source:
-  git_url: https://github.com/ddunwoody/mdf.git
+  git_url: https://github.com/florin-court/mdf.git
   git_rev: {{ version }}
 
 build:
