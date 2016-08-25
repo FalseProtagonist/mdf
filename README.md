@@ -1,7 +1,7 @@
 mdf
 ===
 
-[![Build Status](https://travis-ci.org/ddunwoody/mdf.svg?branch=master)](https://travis-ci.org/ddunwoody/mdf)
+[![Build Status](https://travis-ci.com/florin-court/mdf.svg?token=FqPrp9sqsfaJ2PUuT1rX&branch=master)](https://travis-ci.com/florin-court/mdf)
 
 mdf stands for man systematic strategies data-flow. mdf is a toolkit for expressing programs in Python as directed acyclic graphs (DAGS). mdf was developed to make it easier to wire together quantitative trading strategies composed of related computations over time-series data, but it can be used as a toolkit for describing general computations as DAGS.
 
