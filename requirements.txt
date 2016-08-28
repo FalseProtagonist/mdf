@@ -1,4 +1,4 @@
-Cython<0.23
+Cython
 numpy
 pyzmq
 Pyro4==4.14
