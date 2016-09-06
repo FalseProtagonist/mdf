@@ -6,6 +6,7 @@ from mdf import (
     shift,
     now
 )
+import datetime as dt
 import numpy as np
 import pandas as pa
 import unittest
@@ -29,6 +30,16 @@ def B():
 @queuenode(size=5)
 def C():
     return B()
+
+# Note: generators can only use global constants if pickling is to work.
+@evalnode
+def D():
+    i = 1
+    while True:
+        yield B() + i
+        i *= 2
+
+
 
 # this is necessary to stop namespace from looking
 # too far up the stack as it looks for the first frame
@@ -116,6 +127,33 @@ class PickleTest(unittest.TestCase):
         # check that temp_varnode refers to the original node, not the new one
         # that had to be recreated when un-pickled.
         self.assertEquals(shifted_ctx[temp_varnode], "temp_varnode_default")
+
+    def test_generator_pickle(self):
+        # test saving a graph with a generator node works and can be re-loaded
+        a = self.ctx[A] = 5
+        d = self.ctx[D]
+
+        # advance the now node a few times and check d updates
+        date = self.ctx.get_date()
+        for i in range(10):
+            date += dt.timedelta(days=1)
+            self.ctx.set_date(date)
+
+        d = self.ctx[D]
+
+        x = pickle.dumps(self.ctx)
+        new_ctx = pickle.loads(x)
+
+        self.assertEquals(new_ctx[A], a)
+        self.assertEquals(new_ctx[D], d)
+
+        # advance both contexts and check the deserialized context has been restarted correctly
+        for i in range(10):
+            date += dt.timedelta(days=1)
+            self.ctx.set_date(date)
+            new_ctx.set_date(date)
+
+        self.assertEquals(new_ctx[D], self.ctx[D])
 
     def test_save(self):
         tmpdir = tempfile.mkdtemp()

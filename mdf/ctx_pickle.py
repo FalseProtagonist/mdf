@@ -9,11 +9,16 @@ import logging
 import os
 import struct
 
-import sys
 if sys.version_info[0] > 2:
     from builtins import __import__
 else:
     from __builtin__ import __import__
+
+try:
+    import generator_tools
+except ImportError:
+    generator_tools = None
+    pass
 
 _log = logging.getLogger(__name__)
 
@@ -88,8 +93,9 @@ class NodeStateWrapper(object):
     for use while unpickling to allow the full node_state
     to be re-constructed from pickable data.
     """
-    def __init__(self, node_state):
+    def __init__(self, node_state, node=None):
         self.node_state = node_state
+        self.node = node
 
         # additional attributes
         self.alt_context_id = None
@@ -129,7 +135,7 @@ def _pickle_context(ctx):
     for node in _all_nodes.itervalues():
         for ctx_id, node_state in node._states.iteritems():
             if ctx_id in all_ctx_ids:
-                node_states.append((ctx_id, node, NodeStateWrapper(node_state)))
+                node_states.append((ctx_id, node, NodeStateWrapper(node_state, node)))
 
     return (ctx.__class__,
             ctx.get_id(),
@@ -255,6 +261,14 @@ def _pickle_node_state(node_state_wrapper):
     attribs["callees"] = node_state.callees
     attribs["override"] = node_state.override
 
+    # if generator_tools can be imported then pickle the generator
+    if node_state.generator is not None:
+        if generator_tools is not None:
+            attribs["generator"] = generator_tools.dumps(node_state.generator)
+        else:
+            node_name = "<unknown>" if node_state_wrapper.node is None else node_state_wrapper.node.name
+            _log.warn("Node '%s' is a generator and can't be pickled." % node_name)
+
     # store context and override references as ids instead of objects
     if node_state.alt_context:
         extra_attribs["alt_context_id"] = node_state.alt_context.get_id()
@@ -276,6 +290,13 @@ def _unpickle_node_state(ctx_id, dirty_flags, attribs, additional_attribs):
     node_state.callees = attribs["callees"]
     node_state.callers = attribs["callers"]
     node_state.override = attribs["override"]
+
+    # unpickle the generator using generator_tools
+    generator = attribs.get("generator")
+    if generator is not None:
+        assert generator_tools is not None, \
+            "A generator node was pickled with generator_tools, but generator_tools is not available."
+        node_state.generator = generator_tools.loads(generator)
 
     wrapper = NodeStateWrapper(node_state)
     for attr, value in additional_attribs.iteritems():
