@@ -16,8 +16,14 @@ version = '2.2.1'
 cython_profile = False
 cdebug = False
 
+requirements = []
 with open("requirements.txt", "rb") as f:
-    requirements = f.read().split(os.linesep)
+    for line in f.readlines():
+        if not line.strip() or line.startswith("#"):
+            continue
+        if "#egg=" in line:
+            line = line.split("#egg=")[-1]
+        requirements.append(line.strip())
 
 if __name__ == "__main__":
 

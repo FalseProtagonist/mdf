@@ -8,3 +8,4 @@ pyparsing
 matplotlib
 xlwt
 pydot
+-e git://github.com/florin-court/generator_tools.git#egg=generator_tools
