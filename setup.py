@@ -39,6 +39,7 @@ if __name__ == "__main__":
         Extension("mdf.ctx_pickle", ["mdf/ctx_pickle.py"]),
         Extension("mdf.cqueue", ["mdf/cqueue.py"]),
         Extension("mdf.nodetypes._nodetypes", ["mdf/nodetypes/_nodetypes.py"]),
+        Extension("mdf.nodetypes._datanode", ["mdf/nodetypes/_datanode.py"]),
     ]
 
     for e in ext_modules:
