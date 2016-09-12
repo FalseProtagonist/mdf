@@ -7,20 +7,24 @@ using Pyro4.
 from ..context import MDFContext
 from ..runner import run
 from . import serializer
-import Pyro4
-import copy
 import sys
-
-import Pyro4.util
-
-import pickle
-Pyro4.util.Serializer.pickle = pickle
-
-# install the pyro excepthook handler so that we get full remote tracebacks
-sys.excepthook=Pyro4.util.excepthook
 
 import logging
 _log = logging.getLogger(__name__)
+
+try:
+    import Pyro4
+    import Pyro4.util
+    import pickle
+
+    Pyro4.util.Serializer.pickle = pickle
+
+    # install the pyro excepthook handler so that we get full remote tracebacks
+    sys.excepthook=Pyro4.util.excepthook
+except ImportError:
+    Pyro4 = None
+    _log.warn("ImportError importing Pyro4: remote/parallel execution not available.")
+
 
 class Proxy(object):
     """
@@ -48,6 +52,7 @@ class Proxy(object):
         # of the proxy is that it only exists on the server so make sure that
         # doesn't happen.
         raise Exception("Proxy objects aren't pickleable")
+
 
 class ContextProxy(Proxy):
     """
@@ -90,6 +95,7 @@ class ContextProxy(Proxy):
         """shuts down the parent daemon process"""
         self.__remote_api.shutdown()
 
+
 class SerializedContext(object):
     """
     wraps up serializing a context so it can be done once on the client
@@ -102,6 +108,7 @@ class SerializedContext(object):
 
     def _get_real_context(self):
         return self.__serializer.deserialize(self.__data, self.__compressed)
+
 
 class MDFRemoteAPI(object):
     """
@@ -171,6 +178,7 @@ class MDFRemoteAPI(object):
         """shuts down the parent daemon process"""
         self.pyro_daemon.shutdown()
 
+
 _daemon = None
 def get_daemon():
     """returns the Pyro daemon for the current process"""
@@ -178,6 +186,7 @@ def get_daemon():
     if _daemon is None:
         _daemon = Pyro4.Daemon()
     return _daemon
+
 
 def start_server(name=None, pipe=None):
     """
@@ -191,6 +200,9 @@ def start_server(name=None, pipe=None):
     PipeConnection object and the URI of the remote API
     will be sent to it.
     """
+    if Pyro4 is None:
+        raise Exception("Remote/parallel evaluation is not available as Pyro4 could not be imported")
+
     daemon = get_daemon()
     api = MDFRemoteAPI(daemon)
     uri = daemon.register(api)
