@@ -26,11 +26,13 @@ from .common import DIRTY_FLAGS
 
 _python_version = cython.declare(int, sys.version_info[0])
 
+
 @cython.cfunc
 def _dict_iteritems(d):
     if _python_version > 2:
         return iter(d.items())
     return d.iteritems()
+
 
 class MDFCustomNodeIteratorFactory(MDFIteratorFactory):
 
@@ -55,11 +57,11 @@ class MDFCustomNodeIteratorFactory(MDFIteratorFactory):
     def __call__(self):
         return MDFCustomNodeIterator(self.custom_node)
 
+
 class MDFCustomNodeIterator(MDFIterator):
-    
+
     def __init__(self, custom_node):
         self.custom_node = custom_node
-
         self.func = custom_node._custom_iterator_func
         self.node_type_func = self.custom_node._custom_iterator_node_type_func
 
@@ -68,6 +70,15 @@ class MDFCustomNodeIterator(MDFIterator):
 
         self.node_type_is_generator = _isgeneratorfunction(self.node_type_func)
         self.node_type_generator = None
+
+    def __reduce__(self):
+        return (
+            _unpickle_custom_node_iterator,
+            _pickle_custom_node_iterator(self),
+            None,
+            None,
+            None
+        )
 
     def __iter__(self):
         return self
@@ -95,6 +106,26 @@ class MDFCustomNodeIterator(MDFIterator):
         # node type is plain function
         kwargs = self.custom_node._get_kwargs()
         return self.custom_node._custom_iterator_node_type_func(value, **kwargs)
+
+
+
+def _unpickle_custom_node_iterator(custom_node, value_generator, node_type_generator):
+    self = cython.declare(MDFCustomNodeIterator)
+    self = MDFCustomNodeIterator(custom_node)
+    self.value_generator = value_generator
+    self.node_type_generator = node_type_generator
+    return self
+
+
+def _pickle_custom_node_iterator(self_):
+    self = cython.declare(MDFCustomNodeIterator)
+    self = self_
+    return (
+        self.custom_node,
+        self.value_generator,
+        self.node_type_generator,
+    )
+
 
 class MDFCustomNode(MDFEvalNode):
     """
@@ -376,6 +407,7 @@ class MDFCustomNode(MDFEvalNode):
         kwargs = self._get_kwargs()
         return self._node_type_func(value, **kwargs)
 
+
 class MDFCustomNodeMethod(object):
     """
     Callable object that is added to MDFNode's set of attributes
@@ -537,6 +569,7 @@ class MDFCustomNodeMethod(object):
 
         return derived_node
 
+
 class MDFCustomNodeDecorator(object):
     """
     decorator that applies a custom node type to a function to
@@ -600,6 +633,7 @@ class MDFCustomNodeDecorator(object):
                                     filter=filter,
                                     nodetype_func_kwargs=kwargs)
         return node
+
 
 def nodetype(func=None, cls=MDFCustomNode, method=None):
     """
@@ -682,8 +716,10 @@ def nodetype(func=None, cls=MDFCustomNode, method=None):
 
     return MDFCustomNodeDecorator(func, cls)
 
+
 class MDFQueueNode(MDFCustomNode):
     pass
+
 
 class _queuenode(MDFIterator):
     """
@@ -738,6 +774,16 @@ class _queuenode(MDFIterator):
         if filter_node_value:
             self.queue.append(value)
 
+    def __reduce__(self):
+        """support for pickling"""
+        return (
+            _unpickle_queuenode,
+            _pickle_queuenode(self),
+            None,
+            None,
+            None,
+        )
+
     def next(self):
         if self.as_list:
             return list(self.queue)
@@ -749,8 +795,26 @@ class _queuenode(MDFIterator):
             return list(self.queue)
         return self.queue
 
+
+def _unpickle_queuenode(queue, as_list):
+    self = cython.declare(_queuenode)
+    self = _queuenode(None, False, queue.maxlen, as_list)
+    self.queue.extend(queue)
+    return self
+
+
+def _pickle_queuenode(self_):
+    self = cython.declare(_queuenode)
+    self = self_
+    return (
+        self.queue,
+        self.as_list
+    )
+
+
 # decorators don't work on cythoned classes
 queuenode = nodetype(_queuenode, cls=MDFQueueNode, method="queue")
+
 
 class MDFDelayNode(MDFCustomNode):
     """
@@ -923,6 +987,7 @@ class MDFDelayNode(MDFCustomNode):
         # finished being changed.
         return True
 
+
 class _delaynode(MDFIterator):
     """
     Decorator for creating an :py:class:`MDFNode` that delays
@@ -1031,12 +1096,15 @@ class _delaynode(MDFIterator):
             self.queue.append(value)
         return self.queue[0]
 
+
 # decorators don't work on cythoned classes
 delaynode = nodetype(_delaynode, cls=MDFDelayNode, method="delay")
+
 
 class MDFSampleNode(MDFCustomNode):
     # always pass date_node as the node rather than evaluate it
     nodetype_node_kwargs = ["date_node"]
+
 
 class _samplenode(MDFIterator):
     """
@@ -1076,11 +1144,14 @@ class _samplenode(MDFIterator):
             self._sample = value 
         return self._sample
 
+
 # decorators don't work on cythoned classes
 samplenode = nodetype(_samplenode, cls=MDFSampleNode, method="sample")
 
+
 class MDFNanSumNode(MDFCustomNode):
     pass
+
 
 class _nansumnode(MDFIterator):
     """
@@ -1152,11 +1223,14 @@ class _nansumnode(MDFIterator):
             return self._send_float(value)
         return self._send_vector(value)
 
+
 # decorators don't work on cythoned types
 nansumnode = nodetype(cls=MDFNanSumNode, method="nansum")(_nansumnode)
 
+
 class MDFCumulativeProductNode(MDFCustomNode):
     pass
+
 
 class _cumprodnode(MDFIterator):
     """
@@ -1244,12 +1318,14 @@ class _cumprodnode(MDFIterator):
             return self._send_float(value)
         return self._send_vector(value)
 
+
 # decorators don't work on cythoned types
 cumprodnode = nodetype(cls=MDFCumulativeProductNode, method="cumprod")(_cumprodnode)
 
 
 class MDFForwardFillNode(MDFCustomNode):
     pass
+
 
 class _ffillnode(MDFIterator):
     """
@@ -1337,11 +1413,14 @@ class _ffillnode(MDFIterator):
         self.current_value[mask] = value[mask]
         return self.current_value.copy()
 
+
 # decorators don't work on cythoned types
 ffillnode = nodetype(cls=MDFForwardFillNode, method="ffill")(_ffillnode)
 
+
 class MDFReturnsNode(MDFCustomNode):
     pass
+
 
 class _returnsnode(MDFIterator):
     """
@@ -1435,8 +1514,10 @@ class _returnsnode(MDFIterator):
         self.returns[np.isnan(self.returns)] = 0.0
         return self.returns
 
+
 # decorators don't work on cythoned types
 returnsnode = nodetype(cls=MDFReturnsNode, method="returns")(_returnsnode)
+
 
 #
 # datarownode is used to construct nodes from either DataFrames, WidePanels or
@@ -1445,6 +1526,7 @@ returnsnode = nodetype(cls=MDFReturnsNode, method="returns")(_returnsnode)
 class MDFRowIteratorNode(MDFCustomNode):
     # always pass index_node as the node rather than evaluate it
     nodetype_node_kwargs = ["index_node"]
+
 
 class _rowiternode(MDFIterator):
     """
@@ -1685,8 +1767,10 @@ class _rowiternode(MDFIterator):
 
         return self._missing_value
 
+
 # decorators don't work on cythoned types
 rowiternode = nodetype(cls=MDFRowIteratorNode, method="rowiter")(_rowiternode)
+
 
 #
 # helper function for creating a row iterator node, but without having
@@ -1756,6 +1840,7 @@ def datanode(name=None,
                               })
     return node
 
+
 def filternode(name=None,
                data=None,
                index_node=now,
@@ -1808,6 +1893,7 @@ def filternode(name=None,
                               })
     return node
 
+
 #
 # applynode is a way of transforming a plain function into an mdf
 # node by binding other nodes to its parameters.
@@ -1816,6 +1902,7 @@ def filternode(name=None,
 #
 class MDFApplyNode(MDFCustomNode):
     nodetype_kwargs = ["func", "args", "kwargs"]
+
 
 def _applynode(value, func, args=(), kwargs={}):
     """
@@ -1844,8 +1931,10 @@ def _applynode(value, func, args=(), kwargs={}):
 
     return func(value, *new_args, **new_kwargs)
 
+
 # decorators don't work on cythoned types
 applynode = nodetype(cls=MDFApplyNode, method="apply")(_applynode)
+
 
 #
 # lookaheadnode evaluates a node over a date range or for a number
@@ -1866,6 +1955,7 @@ class MDFLookAheadNode(MDFCustomNode):
         """called just before 'now' is changed"""
         # return True if date is going backwards to indicate we should be marked as dirty
         return ctx.get_date() > date
+
 
 def _lookaheadnode(value_unused, owner_node, periods, filter_node=None, offset=pa.datetools.BDay()):
     """
@@ -1937,10 +2027,11 @@ def _lookaheadnode(value_unused, owner_node, periods, filter_node=None, offset=p
         return pa.DataFrame(values, index=dates)
 
     return pa.Series(values, index=dates)
-     
+
 
 # decorators don't work on cythoned classes
 lookaheadnode = nodetype(_lookaheadnode, cls=MDFLookAheadNode, method="lookahead")
+
 
 class Op(object):
     op = cython.declare(object)
@@ -1960,6 +2051,7 @@ class Op(object):
         if rhs is not None:
             args = (rhs,)
         return self.lhs.applynode(func=self.op, args=args)
+
 
 if sys.version_info[0] <= 2:
     for op in ("__add__", "__sub__", "__mul__", "__div__", "__neg__"):

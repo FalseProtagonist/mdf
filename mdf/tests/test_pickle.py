@@ -69,6 +69,17 @@ class PickleTest(unittest.TestCase):
         # unpickling the context shouldn't re-evaluate anything
         self.assertEquals(num_calls, _b_num_calls)
 
+        # advance the now node a few times and check both contexts update
+        date = self.ctx.get_date()
+        for i in range(10):
+            date += dt.timedelta(days=1)
+            self.ctx.set_date(date)
+            new_ctx.set_date(date)
+
+            self.assertEquals(new_ctx[A], self.ctx[A])
+            self.assertEquals(new_ctx[B], self.ctx[B])
+            self.assertEquals(new_ctx[C], self.ctx[C])
+
     def test_node_method_pickle(self):
         # get another node via a nodetype method
         # use nan in the args as there were problems pickling/unpicking nan
