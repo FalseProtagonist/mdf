@@ -27,6 +27,8 @@ DIRTY_FLAGS_TIME = DIRTY_FLAGS.TIME
 DIRTY_FLAGS_DATE = DIRTY_FLAGS.DATE
 DIRTY_FLAGS_DATETIME = DIRTY_FLAGS.DATETIME
 DIRTY_FLAGS_ERROR = DIRTY_FLAGS.ERROR
+DIRTY_FLAGS_INVALIDATE_GENERATOR = DIRTY_FLAGS.INVALIDATE_GENERATOR
+DIRTY_FLAGS_CHANGED_MASK = DIRTY_FLAGS.CHANGED_MASK
 
 # MethodWrapperType is missing from types
 MethodWrapperType = type([].__delattr__)
@@ -857,9 +859,12 @@ class MDFNode(MDFNodeBase):
                 node.on_set_dirty(ctx, flags)
 
             # remove any cached value as it will have to be re-calculated
-            if flags & ~DIRTY_FLAGS_DATETIME:
+            if flags & (DIRTY_FLAGS_CHANGED_MASK & ~DIRTY_FLAGS_DATETIME):
                 node_state.has_value = False
                 node_state.value = None
+
+            if flags & DIRTY_FLAGS_INVALIDATE_GENERATOR:
+                node_state.generator = None
 
             # add this node's callers to the list to process
             for ctx_id, callers in node_state.callers.iteritems():
@@ -878,7 +883,7 @@ class MDFNode(MDFNodeBase):
     def _touch(self, node_state, flags=DIRTY_FLAGS_ALL, _quiet=False, _depth=0):
         """
         Mark this node as not dirty and all calling nodes as dirty.
-        
+
         All shifted contexts that also share this node are also touched.
 
         If _quiet is True only this node is touched (in ctx and possibly
@@ -919,7 +924,7 @@ class MDFNode(MDFNodeBase):
         node_state = self._get_state(ctx)
 
         # return the cached value if the node isn't dirty
-        if node_state.dirty_flags == DIRTY_FLAGS_NONE:
+        if node_state.dirty_flags & DIRTY_FLAGS_CHANGED_MASK == DIRTY_FLAGS_NONE:
             if _trace_enabled:
                 _logger.debug("Have cached value for %s[%s]" % (self.name, ctx))
             return self._get_cached_value_and_date(ctx, node_state)[0]
@@ -1524,7 +1529,8 @@ class MDFEvalNode(MDFNode):
         # date look for a previous value and call the timestep func
         dirty_flags = node_state.dirty_flags
         if self._is_generator \
-        and (dirty_flags & DIRTY_FLAGS_DATETIME) == dirty_flags \
+        and dirty_flags & DIRTY_FLAGS_DATETIME \
+        and (dirty_flags & ~DIRTY_FLAGS_INVALIDATE_GENERATOR) == dirty_flags \
         and node_state.generator is not None: 
             # if this node has been valued already for this context
             # check the date and see if it can be updated from that

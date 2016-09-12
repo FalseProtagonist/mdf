@@ -271,14 +271,41 @@ class MDFCustomNode(MDFEvalNode):
             # @func.some_kwarg
             # def kwarg_value():
             #    ...
-            # 
-            def _decorator(func):
+            #
+            #
+            # If the decorator is called as a method the previously registered
+            # target function is evaluated and the result is returned.
+            # If the target function is a node the kwarg 'ctx' can be used
+            # to provide a context to evaluate it in (otherwise the current
+            # context will be used.
+            #
+            # e.g.:
+            #
+            #   func.some_kwarg()  # calls kwarg_value()
+            #
+            def _decorator(*args, **kwargs):
+                if not args:
+                    # if there are no args evaluate and return the value
+                    func = self._kwargs.get(attr)
+                    if func is None:
+                        return None
+
+                    if isinstance(func, MDFNode):
+                        ctx = kwargs.get("ctx")
+                        if ctx is not None:
+                            return ctx[func]
+                    return func()
+
+                # set the function as the node's kwarg
+                func, = args
                 self._kwargs[attr] = func
                 if isinstance(func, MDFNode):
                     self._kwnodes[attr] = func
                 elif isinstance(func, types.FunctionType):
                     self._kwfuncs[attr] = func
+
                 return func
+
             return _decorator
 
         return _make_decorator(attr)
@@ -1571,7 +1598,7 @@ class MDFLookAheadNode(MDFCustomNode):
     
     # don't mark this node as dirty when dependent nodes are dirtied
     # because of changes to the current date.
-    dirty_flags_propagate_mask = ~DIRTY_FLAGS.TIME
+    dirty_flags_propagate_mask = ~DIRTY_FLAGS.DATETIME
 
     def on_set_date(self, ctx, date):
         """called just before 'now' is changed"""

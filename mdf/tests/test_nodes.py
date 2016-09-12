@@ -6,14 +6,10 @@ from mdf import (
     cumprodnode,
     delaynode,
     ffillnode,
-    vargroup,
-    datanode,
-    run,
-    DataFrameBuilder
+    vargroup
 )
 
 from datetime import datetime
-from numpy.testing.utils import assert_almost_equal
 import pandas as pd
 import numpy as np
 import unittest
@@ -199,21 +195,6 @@ class NodeTest(unittest.TestCase):
         unfilled_value = self.ctx[ffill_array_test_not_filled]
         self.assertTrue(np.isnan(unfilled_value).all())
         self.assertEquals(value.tolist(), [10., 10., 10., 10., 10.])
-
-    def test_datanode_ffill(self):
-        data = pd.Series(range(len(self.daterange)), self.daterange, dtype=float)
-        data = data[[bool(i % 2) for i in range(len(data.index))]]
-
-        expected = data.reindex(self.daterange, method="ffill")
-        expected[np.isnan(expected)] = np.inf
-
-        node = datanode("test_datanode_ffill", data, ffill=True, missing_value=np.inf)
-        qnode = node.queuenode()
-
-        self._run(qnode)
-        value = self.ctx[qnode]
-
-        self.assertEquals(list(value), expected.values.tolist())
 
     def test_lookahead_node(self):
         B_queue = B.queuenode()

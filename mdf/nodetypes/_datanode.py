@@ -2,23 +2,32 @@ import datetime
 import numpy as np
 import pandas as pa
 import cython
-from ._nodetypes import MDFCustomNode, nodetype
+from collections import deque
+from ._nodetypes import MDFCustomNode, MDFCustomNodeIterator, nodetype
+from ..common import DIRTY_FLAGS
+from ..context import MDFContext, _get_current_context
 from ..parser import get_assigned_node_name
 from ..nodes import (
     MDFNode,
     MDFIterator,
     MDFCallable,
+    NodeState,
     now,
 )
 
 # needed in pure-python mode
 #from ._nodetypes import dict_iteritems
 
+
 __all__ = [
     "rowiternode",
     "datanode",
     "filternode"
 ]
+
+
+DIRTY_FLAGS_FUTURE_DATA = cython.declare(int, DIRTY_FLAGS.FUTURE_DATA)
+
 
 #
 # datarownode is used to construct nodes from either DataFrames, WidePanels or
@@ -27,6 +36,38 @@ __all__ = [
 class MDFRowIteratorNode(MDFCustomNode):
     # always pass index_node as the node rather than evaluate it
     nodetype_node_kwargs = ["index_node"]
+
+
+    def append(self, data, ctx=None):
+        """
+        Appends new data to the dataframe/series.
+
+        This can be called at any time, but the data added must only be effective
+        strictly after the current value of 'now'.
+        """
+        if ctx is None:
+            ctx = _get_current_context()
+
+        # make sure the node has been evaluated before getting the node state
+        _unused = ctx[self]
+        alt_ctx = cython.declare(MDFContext)
+        alt_ctx = self._get_alt_context(ctx)
+
+        node_state = cython.declare(NodeState)
+        node_state = self._states[alt_ctx._id_obj]
+
+        # get the row iterator from the node state
+        iterator = cython.declare(MDFCustomNodeIterator)
+        iterator = node_state.generator
+
+        rowiter = cython.declare(_rowiternode)
+        rowiter = iterator.node_type_generator
+
+        # add the data to the iterator
+        rowiter._append(data, alt_ctx)
+
+        # mark the node as dirty for future data
+        self.set_dirty(alt_ctx, DIRTY_FLAGS_FUTURE_DATA)
 
 
 class _rowiternode(MDFIterator):
@@ -76,12 +117,18 @@ class _rowiternode(MDFIterator):
 
     def __init__(self, data, owner_node, index_node=now, missing_value=np.nan, delay=0, ffill=False):
         """data should be a dataframe, widepanel or timeseries"""
+        self._owner_node = owner_node
         self._current_index = None
         self._current_value = None
         self._prev_value = None
         self._missing_value_orig = missing_value
         self._index_to_date = False
         self._ffill = ffill
+
+        # data can be appended to - keep track of the first data block and any subsequent blocks
+        self._initial_data = data
+        self._appended_data = []
+        self._appended_data_index = 0
 
         # call the index node to make sure this node depends on it and remember the type
         index_value = index_node()
@@ -95,6 +142,22 @@ class _rowiternode(MDFIterator):
 
         self._set_data(data)
 
+    def _get_iterator(self, data):
+        """return a tuple of (iterator, current index, current value for a dataframe, panel or series"""
+        if self._is_dataframe:
+            iterator = iter(data.index)
+            current_index = next(iterator)
+            current_value = data.xs(current_index)
+        if self._is_widepanel:
+            iterator = iter(data.major_axis)
+            current_index = next(iterator)
+            current_value = data.major_xs(current_index)
+        if self._is_series:
+            iterator = iter(sorted(dict_iteritems(data)))
+            current_index, current_value = next(iterator)
+
+        return iterator, current_index, current_value
+
     def _set_data(self, data):
         self._data = data
 
@@ -106,53 +169,43 @@ class _rowiternode(MDFIterator):
         # of a dataframe) so restore it to the original value.
         self._missing_value = self._missing_value_orig
 
+        if isinstance(data, pa.DataFrame):
+            self._is_dataframe = True
+
+            # convert missing value to a row with the same columns as the dataframe
+            if not isinstance(self._missing_value, pa.Series):
+                dtype = object
+                if data.index.size > 0:
+                    dtype = data.xs(data.index[0]).dtype
+                self._missing_value = pa.Series(self._missing_value,
+                                                index=data.columns,
+                                                dtype=dtype)
+
+        elif isinstance(data, pa.WidePanel):
+            self._is_widepanel = True
+
+            # convert missing value to a dataframe with the same dimensions as the panel
+            if not isinstance(self._missing_value, pa.DataFrame):
+                if not isinstance(self._missing_value, dict):
+                    self._missing_value = dict([(c, self._missing_value) for c in data.items])
+                self._missing_value = pa.DataFrame(self._missing_value,
+                                                   columns=data.items,
+                                                   index=data.minor_axis,
+                                                   dtype=data.dtype)
+
+        elif isinstance(data, pa.Series):
+            self._is_series = True
+
+        else:
+            clsname = type(data)
+            if hasattr(data, "__class__"):
+                clsname = data.__class__.__name__
+            raise AssertionError("datanode expects a DataFrame, WidePanel or Series; "
+                                 "got '%s'" % clsname)
+
+        # set up the iterator
         try:
-            if isinstance(data, pa.DataFrame):
-                self._is_dataframe = True
-
-                # convert missing value to a row with the same columns as the dataframe
-                if not isinstance(self._missing_value, pa.Series):
-                    dtype = object
-                    if data.index.size > 0:
-                        dtype = data.xs(data.index[0]).dtype
-                    self._missing_value = pa.Series(self._missing_value,
-                                                    index=data.columns,
-                                                    dtype=dtype)
-
-                # set up the iterator
-                self._iter = iter(data.index)
-                self._current_index = next(self._iter)
-                self._current_value = self._data.xs(self._current_index)
-
-            elif isinstance(data, pa.WidePanel):
-                self._is_widepanel = True
-
-                # convert missing value to a dataframe with the same dimensions as the panel
-                if not isinstance(self._missing_value, pa.DataFrame):
-                    if not isinstance(self._missing_value, dict):
-                        self._missing_value = dict([(c, self._missing_value) for c in data.items])
-                    self._missing_value = pa.DataFrame(self._missing_value,
-                                                       columns=data.items,
-                                                       index=data.minor_axis,
-                                                       dtype=data.dtype)
-
-                # set up ther iterator
-                self._iter = iter(data.major_axis)
-                self._current_index = next(self._iter)
-                self._current_value = self._data.major_xs(self._current_index)
-
-            elif isinstance(data, pa.Series):
-                self._is_series = True
-                self._iter = dict_iteritems(data)
-                self._current_index, self._current_value = next(self._iter)
-
-            else:
-                clsname = type(data)
-                if hasattr(data, "__class__"):
-                    clsname = data.__class__.__name__
-                raise AssertionError("datanode expects a DataFrame, WidePanel or Series; "
-                                     "got '%s'" % clsname)
-
+            self._iter, self._current_index, self._current_value = self._get_iterator(data)
         except StopIteration:
             self._current_index = None
             self._current_value = self._missing_value
@@ -167,8 +220,12 @@ class _rowiternode(MDFIterator):
                               and self._index_node_type is datetime.datetime
 
     def send(self, data):
-        if data is not self._data:
+        if data is not self._initial_data:
+            # clear the previous data and any appended data and restart with
+            # the new dataframe/series etc
             self._set_data(data)
+            self._appended_data = []
+            self._appended_data_index = 0
         return self.next()
 
     def next(self):
@@ -200,6 +257,13 @@ class _rowiternode(MDFIterator):
                 self._current_index = next(self._iter)
                 self._current_value = self._data.xs(self._current_index)
             except StopIteration:
+                # If another block of data has been appended switch to that
+                if self._appended_data_index < len(self._appended_data):
+                    self._set_data(self._appended_data[self._appended_data_index])
+                    self._appended_data_index += 1
+                    continue
+
+                # otherwise we're at the end of the data
                 if self._ffill:
                     return self._current_value
                 return self._missing_value
@@ -229,6 +293,13 @@ class _rowiternode(MDFIterator):
                 self._current_index = next(self._iter)
                 self._current_value = self._data.major_xs(self._current_index)
             except StopIteration:
+                # If another block of data has been appended switch to that
+                if self._appended_data_index < len(self._appended_data):
+                    self._set_data(self._appended_data[self._appended_data_index])
+                    self._appended_data_index += 1
+                    continue
+
+                # otherwise we're at the end of the data
                 if self._ffill:
                     return self._prev_value
                 return self._missing_value
@@ -256,6 +327,13 @@ class _rowiternode(MDFIterator):
                 self._prev_value = self._current_value
                 self._current_index, self._current_value = next(self._iter)
             except StopIteration:
+                # If another block of data has been appended switch to that
+                if self._appended_data_index < len(self._appended_data):
+                    self._set_data(self._appended_data[self._appended_data_index])
+                    self._appended_data_index += 1
+                    continue
+
+                # otherwise we're at the end of the data
                 if self._ffill:
                     return self._prev_value
                 return self._missing_value
@@ -267,6 +345,31 @@ class _rowiternode(MDFIterator):
             return self._prev_value
 
         return self._missing_value
+
+    def _append(self, data, ctx):
+        # check the type of the data matches the original data
+        if self._is_dataframe:
+            assert isinstance(data, pa.DataFrame), \
+                "Expected a DataFrame when appending to data node '%s'" % self._owner_node.name
+        elif self._is_widepanel:
+            assert isinstance(data, pa.WidePanel), \
+                "Expected a WidePanel when appending to data node '%s'" % self._owner_node.name
+        elif self._is_series:
+            assert isinstance(data, pa.Series), \
+                "Expected a Series when appending to data node '%s'" % self._owner_node.name
+
+        # check we've not advanced past the first item in the data
+        _unused, first_index, _unused = self._get_iterator(data)
+
+        current_index = ctx[self._index_node]
+        if type(first_index) is datetime.date and type(current_index) is datetime.datetime:
+            current_index = current_index.date()
+
+        if current_index >= first_index:
+            raise Exception("Cannot append data as the index <= current index (i.e. new data is in the past).")
+
+        # add the data
+        self._appended_data.append(data)
 
 
 # decorators don't work on cythoned types

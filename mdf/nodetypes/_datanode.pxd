@@ -1,10 +1,19 @@
-from ..nodes cimport MDFNode, MDFIterator
-from ._nodetypes cimport dict_iteritems
+from ..nodes cimport MDFNode, MDFIterator, NodeState
+from ..context cimport MDFContext
+from ._nodetypes cimport MDFCustomNode, MDFCustomNodeIterator, dict_iteritems
+
+
+cdef class MDFRowIteratorNode(MDFCustomNode):
+    cpdef append(self, data, MDFContext ctx=?)
 
 
 cdef class _rowiternode(MDFIterator):
-    cdef object _data
+    cdef MDFNode _owner_node
     cdef MDFNode _index_node
+    cdef object _data
+    cdef object _initial_data
+    cdef object _appended_data
+    cdef int _appended_data_index
     cdef object _index_node_type
     cdef object _iter
     cdef object _current_index
@@ -19,9 +28,14 @@ cdef class _rowiternode(MDFIterator):
     cdef int _index_to_date
 
     cdef _set_data(self, data)
+    cdef _get_iterator(self, data)
     cdef _next_dataframe(self)
     cdef _next_widepanel(self)
     cdef _next_series(self)
 
+    cpdef _append(self, data, MDFContext ctx)
+
     cpdef next(self)
     cpdef send(self, value)
+
+

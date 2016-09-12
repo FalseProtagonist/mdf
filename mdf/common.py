@@ -34,6 +34,12 @@ class DIRTY_FLAGS:
     FUTURE_DATA = 0x4
     ERROR = 0x10
 
+    # if flags match the changed mask then the value may have changed
+    CHANGED_MASK = ~FUTURE_DATA
+
+    # if any of these flags are set the node's iterator/generator is invalid
+    INVALIDATE_GENERATOR = CHANGED_MASK & ~DATETIME
+
     @classmethod
     def to_string(cls, mask):
         if mask == cls.NONE:
