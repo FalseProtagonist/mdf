@@ -1,5 +1,5 @@
-from nodes cimport MDFNode, MDFEvalNode, MDFIterator
-from context cimport MDFContext
+from ..nodes cimport MDFNode, MDFEvalNode, MDFIterator
+from ..context cimport MDFContext
 
 cdef class MDFCustomNode(MDFEvalNode):
     cdef MDFNode _base_node

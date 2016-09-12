@@ -8,7 +8,7 @@ import types
 import sys
 import cython
 
-from .nodes import (
+from ..nodes import (
     MDFNode,
     MDFEvalNode,
     MDFIterator,
@@ -19,10 +19,10 @@ from .nodes import (
     _get_func_name,
     now,
 )
-from .context import MDFContext, _get_current_context
-from .ctx_pickle import _unpickle_custom_node, _pickle_custom_node
-from .parser import get_assigned_node_name
-from .common import DIRTY_FLAGS
+from ..context import MDFContext, _get_current_context
+from ..ctx_pickle import _unpickle_custom_node, _pickle_custom_node
+from ..parser import get_assigned_node_name
+from ..common import DIRTY_FLAGS
 
 _python_version = cython.declare(int, sys.version_info[0])
 

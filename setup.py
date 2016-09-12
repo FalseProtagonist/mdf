@@ -36,9 +36,9 @@ if __name__ == "__main__":
     ext_modules = [
         Extension("mdf.context", ["mdf/context.py"]),
         Extension("mdf.nodes", ["mdf/nodes.py"]),
-        Extension("mdf.nodetypes", ["mdf/nodetypes.py"]),
         Extension("mdf.ctx_pickle", ["mdf/ctx_pickle.py"]),
         Extension("mdf.cqueue", ["mdf/cqueue.py"]),
+        Extension("mdf.nodetypes._nodetypes", ["mdf/nodetypes/_nodetypes.py"]),
     ]
 
     for e in ext_modules:
