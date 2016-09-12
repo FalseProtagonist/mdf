@@ -17,6 +17,9 @@ from . import io
 DIRTY_FLAGS_NONE = cython.declare(int, DIRTY_FLAGS.NONE)
 DIRTY_FLAGS_ALL  = cython.declare(int, DIRTY_FLAGS.ALL)
 DIRTY_FLAGS_TIME = cython.declare(int, DIRTY_FLAGS.TIME)
+DIRTY_FLAGS_DATE = cython.declare(int, DIRTY_FLAGS.DATE)
+DIRTY_FLAGS_DATETIME = cython.declare(int, DIRTY_FLAGS.DATETIME)
+
 
 _python_version = cython.declare(int, sys.version_info[0])
 
@@ -742,6 +745,10 @@ class MDFContext(object):
 
         # now all the on_set_date callbacks have been called update the date
         # for each context and mark any incrementally updated nodes as dirty.
+        flags = cython.declare(int)
+        flags = DIRTY_FLAGS_TIME
+        if date.toordinal() != prev_date.toordinal():
+            flags |= DIRTY_FLAGS_DATE
         for ctx in all_contexts:
             # set now on the context
             ctx._now = date
@@ -749,12 +756,12 @@ class MDFContext(object):
             # mark any incrementally updated nodes as dirty
             if ctx._has_incrementally_updated_nodes:
                 for node in ctx._incrementally_updated_nodes.iterkeys():
-                    node.set_dirty(ctx, DIRTY_FLAGS_TIME)
+                    node.set_dirty(ctx, flags)
 
         # mark any nodes that indicated they would become dirty after calling 'on_set_date'
         if on_set_date_dirty_count > 0:
             for node, ctx in on_set_date_dirty:
-                node.set_dirty(ctx, DIRTY_FLAGS_TIME)
+                node.set_dirty(ctx, flags)
 
         # set the now node value in the least shifted context
         # (anything dependent on now will be dependent on

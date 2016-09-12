@@ -24,7 +24,9 @@ _trace_enabled = cython.declare(int, False)
 DIRTY_FLAGS_NONE = DIRTY_FLAGS.NONE
 DIRTY_FLAGS_ALL  = DIRTY_FLAGS.ALL
 DIRTY_FLAGS_TIME = DIRTY_FLAGS.TIME
-DIRTY_FLAGS_ERR = DIRTY_FLAGS.ERR
+DIRTY_FLAGS_DATE = DIRTY_FLAGS.DATE
+DIRTY_FLAGS_DATETIME = DIRTY_FLAGS.DATETIME
+DIRTY_FLAGS_ERROR = DIRTY_FLAGS.ERROR
 
 # MethodWrapperType is missing from types
 MethodWrapperType = type([].__delattr__)
@@ -855,7 +857,7 @@ class MDFNode(MDFNodeBase):
                 node.on_set_dirty(ctx, flags)
 
             # remove any cached value as it will have to be re-calculated
-            if flags & ~DIRTY_FLAGS_TIME:
+            if flags & ~DIRTY_FLAGS_DATETIME:
                 node_state.has_value = False
                 node_state.value = None
 
@@ -953,7 +955,7 @@ class MDFNode(MDFNodeBase):
             self._touch(node_state, DIRTY_FLAGS_ALL, True)
 
             # Set the error flag
-            self._set_dirty(node_state, DIRTY_FLAGS_ERR, 0)
+            self._set_dirty(node_state, DIRTY_FLAGS_ERROR, 0)
             
             # and re-raise
             raise
@@ -1522,7 +1524,7 @@ class MDFEvalNode(MDFNode):
         # date look for a previous value and call the timestep func
         dirty_flags = node_state.dirty_flags
         if self._is_generator \
-        and dirty_flags == DIRTY_FLAGS_TIME \
+        and (dirty_flags & DIRTY_FLAGS_DATETIME) == dirty_flags \
         and node_state.generator is not None: 
             # if this node has been valued already for this context
             # check the date and see if it can be updated from that
@@ -1834,8 +1836,8 @@ class MDFTimeNode(MDFVarNode):
         return "now"
 
     def _touch(self, node_state, flags=DIRTY_FLAGS_ALL, _quiet=False, _depth=0):
-        # only set the TIME flag on dependent nodes
-        MDFVarNode._touch(self, node_state, flags & DIRTY_FLAGS_TIME, _quiet, _depth)
+        # only set the TIME and DATE flags on dependent nodes
+        MDFVarNode._touch(self, node_state, flags & DIRTY_FLAGS_DATETIME, _quiet, _depth)
         # but clear all flags on this node
         node_state.dirty_flags &= ~flags
 

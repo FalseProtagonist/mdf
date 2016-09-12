@@ -27,9 +27,12 @@ class DIRTY_FLAGS:
     as dirty (needing to be updated).
     """
     NONE = 0x0
-    ALL  = ~NONE
-    TIME = 0x1
-    ERR = 0x2
+    ALL = ~NONE
+    DATE = 0x1
+    TIME = 0x2
+    DATETIME = DATE | TIME
+    FUTURE_DATA = 0x4
+    ERROR = 0x10
 
     @classmethod
     def to_string(cls, mask):

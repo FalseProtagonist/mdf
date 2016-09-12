@@ -33,7 +33,7 @@ class _rowiternode(MDFIterator):
     """
     Decorator that creates an :py:class:`MDFNode` that returns
     the current row of item of a pandas DataFrame, WidePanel
-    or Series returned by the decoratored function.
+    or Series returned by the decorated function.
 
     What row is considered current depends on the `index_node`
     parameter, which by default is `now`.
