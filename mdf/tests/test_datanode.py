@@ -58,6 +58,38 @@ class NodeTest(unittest.TestCase):
         # after continuing with the extra ranges the queuenode should contain all 3 sets of datas
         self.assertEquals(list(value), data.values.tolist() + data2.values.tolist() + data3.values.tolist())
 
+    def test_datanode_append_dataframe(self):
+        data = pd.DataFrame({"A": range(len(self.daterange))}, index=self.daterange, dtype=float)
+
+        node = datanode("test_datanode_append_dataframe", data)
+        qnode = node.queuenode()
+
+        self._run(qnode)
+        value = self.ctx[qnode]
+
+        self.assertEquals([x["A"] for x in value], data["A"].values.tolist())
+
+        # append some data to the data node
+        data2 = pd.DataFrame({"A": range(len(self.daterange2))}, index=self.daterange2, dtype=float)
+        data3 = pd.DataFrame({"A": range(len(self.daterange3))}, index=self.daterange3, dtype=float)
+        node.append(data2, ctx=self.ctx)
+        node.append(data3, ctx=self.ctx)
+
+        # after appending the data the queuenode should have been marked as having some future data added
+        # (which doesn't cause the node to need to be re-evaluated)
+        self.assertTrue(node.is_dirty(self.ctx) == DIRTY_FLAGS.FUTURE_DATA)
+        self.assertTrue(qnode.is_dirty(self.ctx) == DIRTY_FLAGS.FUTURE_DATA)
+        self.assertEquals([x["A"] for x in value], data["A"].values.tolist())
+
+        self._run_for_daterange(self.daterange2, qnode)
+        self._run_for_daterange(self.daterange3, qnode)
+        value = self.ctx[qnode]
+
+        # after continuing with the extra ranges the queuenode should contain all 3 sets of datas
+        self.assertEquals([x["A"] for x in value], data["A"].values.tolist() +
+                                                      data2["A"].values.tolist() +
+                                                      data3["A"].values.tolist())
+
     def test_datanode_append_wrong_type_raises(self):
         data = pd.Series(range(len(self.daterange)), self.daterange, dtype=float)
         node = datanode("test_datanode_append_wrong_type_raises", data)
