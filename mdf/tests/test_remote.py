@@ -16,6 +16,7 @@ def X():
     return A() + B() + now().day
 
 
+@unittest.skip
 class RemoteTest(unittest.TestCase):
 
     def setUp(self):
