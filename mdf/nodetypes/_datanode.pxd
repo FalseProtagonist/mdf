@@ -37,5 +37,3 @@ cdef class _rowiternode(MDFIterator):
 
     cpdef next(self)
     cpdef send(self, value)
-
-

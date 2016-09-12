@@ -40,6 +40,7 @@ if __name__ == "__main__":
         Extension("mdf.cqueue", ["mdf/cqueue.py"]),
         Extension("mdf.nodetypes._nodetypes", ["mdf/nodetypes/_nodetypes.py"]),
         Extension("mdf.nodetypes._datanode", ["mdf/nodetypes/_datanode.py"]),
+        Extension("mdf.nodetypes._filternode", ["mdf/nodetypes/_filternode.py"]),
     ]
 
     for e in ext_modules:

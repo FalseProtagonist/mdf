@@ -1578,41 +1578,61 @@ class MDFEvalNode(MDFNode):
 
                     return new_value
 
-        # if still dirty call func to get the new value
-        if _trace_enabled:
-            _logger.debug("Evaluating %s[%s] (%s)" % (self.name,
-                                                      ctx,
-                                                      DIRTY_FLAGS.to_string(dirty_flags)))
-
-        # call the function, set the value and return it
-        if _profiling_enabled:
-            with ctx._profile(self) as timer:
-                value = self._func()
-        else:
-            value = self._func()
-
-        if self._is_generator:
-            gen = value
-
-            # evaluate the generator
+        # If a filter's set call it, and if the current value should be filtered return the previous value.
+        prev_value_found = cython.declare(cython.bint, False)
+        use_filtered_value = cython.declare(cython.bint, False)
+        filtered_value = cython.declare(object)
+        if not self._is_generator and self._filter_func is not None:
             if _profiling_enabled:
                 with ctx._profile(self) as timer:
-                    value = next(gen)
+                    needs_update = self._filter_func()
             else:
-                value = next(gen)
+                needs_update = self._filter_func()
 
-            node_state.generator = iter(gen)
+            if not needs_update:
+                # if this node has been valued already for this context
+                # check the date and see if it can be updated from that
+                try:
+                    prev_value = self._get_cached_value_and_date(ctx, node_state)[0]
+                    prev_value_found = True
+                except KeyError:
+                    prev_value = None
 
-            # if a filter's set call it just to make sure any dependencies it requires
-            # are set up correctly to avoid conditional dependency errors later
-            if self._filter_func is not None:
+                # re-use the previous value
+                if _trace_enabled:
+                    _logger.debug("Re-using previous value of %s[%s]" % (self.name, ctx))
+
+                self._touch(node_state, DIRTY_FLAGS_ALL, True)
+                filtered_value = prev_value
+                use_filtered_value = True
+
+        # call the function if the node isn't filtered or if there's no previous value (so the
+        # dependencies and, possibly, generator are set up at the start).
+        if not use_filtered_value or not prev_value_found:
+            if _trace_enabled:
+                _logger.debug("Evaluating %s[%s] (%s)" % (self.name,
+                                                          ctx,
+                                                          DIRTY_FLAGS.to_string(dirty_flags)))
+
+            if _profiling_enabled:
+                with ctx._profile(self) as timer:
+                    value = self._func()
+            else:
+                value = self._func()
+
+            if self._is_generator:
+                gen = value
+
+                # evaluate the generator
                 if _profiling_enabled:
                     with ctx._profile(self) as timer:
-                        self._filter_func()
+                        value = next(gen)
                 else:
-                    self._filter_func()
+                    value = next(gen)
 
-        return value
+                node_state.generator = iter(gen)
+
+        return filtered_value if use_filtered_value else value
 
     def _get_alt_context(self, ctx):
         """
@@ -1820,10 +1840,10 @@ def evalnode(func=None, filter=None, category=None):
     On subsequent evaluations, the incrementation step will be also
     executed and the node will produce the updated value.
 
-    **filter** may be used in the case when *func* is a generator to prevent
-    the node valuation being advanced on every timestep. If supplied, it
-    should be a function or node that returns True if the node should
-    be advanced for the current timestep or False otherwise.
+    **filter** may be used to prevent the node valuation being performed
+    when certain conditions are True. If supplied, it should be a function
+    or node that returns True if the node should be evaluated, if dirty,
+    or False otherwise (in which case the previous value will be used).
     """
     if func:
         return MDFEvalNode(func, category=category, filter=filter)

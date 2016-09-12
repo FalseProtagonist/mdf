@@ -2,7 +2,6 @@ import datetime
 import numpy as np
 import pandas as pa
 import cython
-from collections import deque
 from ._nodetypes import MDFCustomNode, MDFCustomNodeIterator, nodetype
 from ..common import DIRTY_FLAGS
 from ..context import MDFContext, _get_current_context
