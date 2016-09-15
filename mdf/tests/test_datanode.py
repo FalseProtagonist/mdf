@@ -1,4 +1,4 @@
-from mdf import MDFContext, datanode, DIRTY_FLAGS, varnode, now
+from mdf import MDFContext, datanode, DIRTY_FLAGS, now, filternode
 import datetime as dt
 import pandas as pd
 import numpy as np
@@ -128,9 +128,6 @@ class NodeTest(unittest.TestCase):
             def __call__(self, update_data):
                 X.data.append(update_data, self.ctx)
 
-            # set this to some node type so that it can be overridden in the initializer
-            data = varnode
-
         initial_data = pd.DataFrame(index=self.daterange, columns=['a'],
                                     data=np.random.rand(len(self.daterange), 1))
         x = X(initial_data)
@@ -150,4 +147,43 @@ class NodeTest(unittest.TestCase):
         for t in self.daterange2:
             x.ctx.set_date(t)
             self.assertEquals(update_data.ix[t, 'a'], x.ctx[X.data]['a'])
+
+    def test_datanode_append_ffill(self):
+        # construct the initial data
+        start = pd.Timestamp('20160802 045000')
+        end = pd.Timestamp('20160802 053000')
+        dr1 = pd.date_range(start=start, end=end, freq='10Min')
+
+        initial_data = pd.Series(index=dr1, data=[1.31967]*len(dr1))
+        end2 = pd.Timestamp('20160802 060000')
+
+        # NB. the datanode filter spans pd.date_range(start=start, end=end2, freq='10Min'), i.e. the whole
+        # date range of interest, but only the first and last points are valid (i.e. filter is True)
+        data_filter = filternode('test_datanode_append_ffill_filternode', data=pd.Series(index=[start, end2]))
+        node = datanode('test_datanode_append_ffill_node', data=initial_data, filter=data_filter)
+
+        ctx = MDFContext()
+
+        # run the clock and collect the output
+        actual = []
+        for dt in dr1:
+            ctx.set_date(dt)
+            actual.append(ctx[node])
+
+        # do an update for the single point pd.Timestamp('20160802 055000')
+        # NB. there is a gap: we didn't get an update for pd.Timestamp('20160802 054000')
+        update_date = pd.Series(index=[pd.Timestamp('20160802 055000')], data=[1.056562])
+        node.append(update_date, ctx)
+
+        # continue running the clock until end2
+        # NB. 1. missing point 054000 should be ffill - it is
+        #     2. updated point 055000 should be ignored (filter is False at this point) and the previous ffill - it is
+        #     3. point 060000 is valid (filter is True at this point) and should be ffill from 054000? - but it's np.nan
+        dr2 = pd.date_range(start=pd.Timestamp('20160802 054000'), end=end2, freq='10Min')
+        for dt in dr2:
+            ctx.set_date(dt)
+            actual.append(ctx[node])
+
+        self.assertEquals(actual, [1.31967]*8)
+
 
