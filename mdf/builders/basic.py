@@ -260,7 +260,7 @@ class NodeTypeHandler(object):
     def __init__(self, node, filter=False, none_fill_value=None):
         self._name = node.short_name
         self._filter = node.get_filter() if filter and isinstance(node, MDFEvalNode) else None
-        self.non_fill_value = none_fill_value
+        self.none_fill_value = none_fill_value
         self._index = []
         self._labels = set()
         self._data = dict()
@@ -338,7 +338,7 @@ class NodeBaseTypeHandler(NodeTypeHandler):
 
     def _handle(self, date, value):
         if value is None:
-            value = self.non_fill_value
+            value = self.none_fill_value
         self._data[(date, self._name)] = value
 
 class DataFrameBuilder(object):

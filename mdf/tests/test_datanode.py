@@ -128,7 +128,7 @@ class NodeTest(unittest.TestCase):
             def __call__(self, update_data):
                 self.ctx[X.data].append(update_data, self.ctx)
 
-            # set this to some node type so that it can be overriden in the initializer
+            # set this to some node type so that it can be overridden in the initializer
             data = varnode()
 
         initial_data = pd.DataFrame(index=self.daterange, columns=['a'],
