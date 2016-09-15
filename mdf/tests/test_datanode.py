@@ -123,13 +123,13 @@ class NodeTest(unittest.TestCase):
         class X(object):
             def __init__(self, initial_data):
                 self.ctx = MDFContext()
-                self.ctx[X.data] = datanode('data', data=initial_data, index_node=now)
+                X.data = datanode('data', data=initial_data, index_node=now)
 
             def __call__(self, update_data):
-                self.ctx[X.data].append(update_data, self.ctx)
+                X.data.append(update_data, self.ctx)
 
             # set this to some node type so that it can be overridden in the initializer
-            data = varnode()
+            data = varnode
 
         initial_data = pd.DataFrame(index=self.daterange, columns=['a'],
                                     data=np.random.rand(len(self.daterange), 1))
