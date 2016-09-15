@@ -1,4 +1,4 @@
-from mdf import MDFContext, datanode, DIRTY_FLAGS
+from mdf import MDFContext, datanode, DIRTY_FLAGS, varnode, now
 import datetime as dt
 import pandas as pd
 import numpy as np
@@ -118,3 +118,36 @@ class NodeTest(unittest.TestCase):
 
     def _run(self, *nodes):
         self._run_for_daterange(self.daterange, *nodes)
+
+    def test_datanode_in_class_append(self):
+        class X(object):
+            def __init__(self, initial_data):
+                self.ctx = MDFContext()
+                self.ctx[X.data] = datanode('data', data=initial_data, index_node=now)
+
+            def __call__(self, update_data):
+                self.ctx[X.data].append(update_data, self.ctx)
+
+            # set this to some node type so that it can be overriden in the initializer
+            data = varnode()
+
+        initial_data = pd.DataFrame(index=self.daterange, columns=['a'],
+                                    data=np.random.rand(len(self.daterange), 1))
+        x = X(initial_data)
+
+        # check that initial data is there
+        for t in self.daterange:
+            x.ctx.set_date(t)
+            self.assertEquals(initial_data.ix[t, 'a'], x.ctx[X.data]['a'])
+
+        # do an update
+        update_data = pd.DataFrame(index=self.daterange2, columns=['a'],
+                                   data=np.random.rand(len(self.daterange2), 1))
+
+        x(update_data)
+
+        # check that update data is there
+        for t in self.daterange2:
+            x.ctx.set_date(t)
+            self.assertEquals(update_data.ix[t, 'a'], x.ctx[X.data]['a'])
+

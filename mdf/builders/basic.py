@@ -257,9 +257,10 @@ class NodeTypeHandler(object):
     Base class for NodeData handling in DataFrameBuilder. Sub-classes
     should override _handle(). Callers should call handle()
     """
-    def __init__(self, node, filter=False):
+    def __init__(self, node, filter=False, none_fill_value=None):
         self._name = node.short_name
         self._filter = node.get_filter() if filter and isinstance(node, MDFEvalNode) else None
+        self.non_fill_value = none_fill_value
         self._index = []
         self._labels = set()
         self._data = dict()
@@ -331,11 +332,13 @@ class NodeSeriesTypeHandler(NodeTypeHandler):
             self._data[(date, str(l))] = value[l]
 
 class NodeBaseTypeHandler(NodeTypeHandler):
-    def __init__(self, node, filter=False):
-        super(NodeBaseTypeHandler, self).__init__(node, filter=filter)
+    def __init__(self, node, filter=False, none_fill_value=None):
+        super(NodeBaseTypeHandler, self).__init__(node, filter=filter, none_fill_value=none_fill_value)
         self._labels.add(self._name)
 
     def _handle(self, date, value):
+        if value is None:
+            value = self.non_fill_value
         self._data[(date, self._name)] = value
 
 class DataFrameBuilder(object):
@@ -397,7 +400,9 @@ class DataFrameBuilder(object):
             handler = handler_dict.get(key)
             
             if not handler:
-                if isinstance(node_value, (basestring, int, float, bool, datetime.date)) \
+                if node_value is None:
+                    handler = NodeBaseTypeHandler(node, filter=self.filter, none_fill_value=self.sparse_fill_value)
+                elif isinstance(node_value, (basestring, int, float, bool, datetime.date)) \
                 or isinstance(node_value, tuple(np.typeDict.values())):
                     handler = NodeBaseTypeHandler(node, filter=self.filter)
                 elif isinstance(node_value, dict):
