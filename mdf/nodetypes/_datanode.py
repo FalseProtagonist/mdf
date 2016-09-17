@@ -139,25 +139,30 @@ class _rowiternode(MDFIterator):
             self._index_node = self._index_node.delaynode(periods=delay,
                                                           filter=owner_node.get_filter())
 
-        self._set_data(data)
+        self._set_data(data, True)
 
-    def _get_iterator(self, data):
+    def _get_iterator(self, data, advance):
         """return a tuple of (iterator, current index, current value for a dataframe, panel or series"""
+        current_index = None
+        current_value = None
         if self._is_dataframe:
             iterator = iter(data.index)
-            current_index = next(iterator)
-            current_value = data.xs(current_index)
+            if advance:
+                current_index = next(iterator)
+                current_value = data.xs(current_index)
         if self._is_widepanel:
             iterator = iter(data.major_axis)
-            current_index = next(iterator)
-            current_value = data.major_xs(current_index)
+            if advance:
+                current_index = next(iterator)
+                current_value = data.major_xs(current_index)
         if self._is_series:
             iterator = iter(sorted(dict_iteritems(data)))
-            current_index, current_value = next(iterator)
+            if advance:
+                current_index, current_value = next(iterator)
 
         return iterator, current_index, current_value
 
-    def _set_data(self, data):
+    def _set_data(self, data, reset):
         self._data = data
 
         self._is_dataframe = False
@@ -203,14 +208,19 @@ class _rowiternode(MDFIterator):
                                  "got '%s'" % clsname)
 
         # set up the iterator
-        try:
-            self._iter, self._current_index, self._current_value = self._get_iterator(data)
-        except StopIteration:
-            self._current_index = None
-            self._current_value = self._missing_value
+        if reset:
+            # get the iterator and advance it to get the first index and value
+            try:
+                self._iter, self._current_index, self._current_value = self._get_iterator(data, True)
+            except StopIteration:
+                self._current_index = None
+                self._current_value = self._missing_value
 
-        # reset _prev_value to the missing value, it will get set as the iterator is advanced.
-        self._prev_value = self._missing_value
+            # reset _prev_value to the missing value, it will get set as the iterator is advanced.
+            self._prev_value = self._missing_value
+        else:
+            # get the iterator but don't advance it and leave the current index and value
+            self._iter, _unused, _unused = self._get_iterator(data, False)
 
         # does the index need to be converted from datetime to date?
         # (use the stored index_node_type as the current value may be delayed
@@ -222,7 +232,7 @@ class _rowiternode(MDFIterator):
         if data is not self._initial_data:
             # clear the previous data and any appended data and restart with
             # the new dataframe/series etc
-            self._set_data(data)
+            self._set_data(data, True)
             self._appended_data = []
             self._appended_data_index = 0
         return self.next()
@@ -258,7 +268,7 @@ class _rowiternode(MDFIterator):
             except StopIteration:
                 # If another block of data has been appended switch to that
                 if self._appended_data_index < len(self._appended_data):
-                    self._set_data(self._appended_data[self._appended_data_index])
+                    self._set_data(self._appended_data[self._appended_data_index], False)
                     self._appended_data_index += 1
                     continue
 
@@ -294,7 +304,7 @@ class _rowiternode(MDFIterator):
             except StopIteration:
                 # If another block of data has been appended switch to that
                 if self._appended_data_index < len(self._appended_data):
-                    self._set_data(self._appended_data[self._appended_data_index])
+                    self._set_data(self._appended_data[self._appended_data_index], False)
                     self._appended_data_index += 1
                     continue
 
@@ -328,7 +338,7 @@ class _rowiternode(MDFIterator):
             except StopIteration:
                 # If another block of data has been appended switch to that
                 if self._appended_data_index < len(self._appended_data):
-                    self._set_data(self._appended_data[self._appended_data_index])
+                    self._set_data(self._appended_data[self._appended_data_index], False)
                     self._appended_data_index += 1
                     continue
 
@@ -358,7 +368,7 @@ class _rowiternode(MDFIterator):
                 "Expected a Series when appending to data node '%s'" % self._owner_node.name
 
         # check we've not advanced past the first item in the data
-        _unused, first_index, _unused = self._get_iterator(data)
+        _unused, first_index, _unused = self._get_iterator(data, True)
 
         current_index = ctx[self._index_node]
         if type(first_index) is datetime.date and type(current_index) is datetime.datetime:

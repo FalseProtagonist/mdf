@@ -149,6 +149,39 @@ class NodeTest(unittest.TestCase):
             self.assertEquals(update_data.ix[t, 'a'], x.ctx[X.data]['a'])
 
     def test_datanode_append_ffill(self):
+        # ffill fills forward missing values, not values that are nan
+        start1 = pd.Timestamp('20160917 000000')
+        end1 = pd.Timestamp('20160917 000900')
+        start2 = pd.Timestamp('20160917 001000')
+        end2 = pd.Timestamp('20160917 001900')
+        ix1 = pd.date_range(start=start1, end=end1, freq='1Min')
+        ix2 = pd.date_range(start=start2, end=end2, freq='1Min')
+        dr = pd.date_range(start=start1, end=end2, freq='1Min')
+
+        # 0 nan 2 nan 4 nan 6 nan 8 nan
+        data1 = pd.Series(index=[x for (i, x) in enumerate(ix1) if i % 2 == 0],
+                          data=[i for (i, x) in enumerate(ix1) if i % 2 == 0])
+
+        # Start the second data set with a missing value to check
+        # it fills forward from the previous data.
+        # nan 1 nan 3 nan 5 nan 7 nan 9
+        data2 = pd.Series(index=[x for (i, x) in enumerate(ix2) if i % 2 != 0],
+                          data=[i for (i, x) in enumerate(ix2) if i % 2 != 0])
+
+        ctx = MDFContext(ix1[0])
+        node = datanode('test_datanode_append_ffill_datanode', data=data1, ffill=True)
+        node.append(data2, ctx)
+
+        expected = [0, 0, 2, 2, 4, 4, 6, 6, 8, 8, 8, 1, 1, 3, 3, 5, 5, 7, 7, 9]
+        actual = []
+
+        for d in dr:
+            ctx.set_date(d)
+            actual.append(ctx[node])
+
+        self.assertEquals(actual, expected)
+
+    def test_datanode_append_ffill_and_filter(self):
         # construct the initial data
         start = pd.Timestamp('20160802 045000')
         end = pd.Timestamp('20160802 053000')
@@ -157,10 +190,15 @@ class NodeTest(unittest.TestCase):
         initial_data = pd.Series(index=dr1, data=[1.31967]*len(dr1))
         end2 = pd.Timestamp('20160802 060000')
 
-        # NB. the datanode filter spans pd.date_range(start=start, end=end2, freq='10Min'), i.e. the whole
+        # The datanode filter spans pd.date_range(start=start, end=end2, freq='10Min'), i.e. the whole
         # date range of interest, but only the first and last points are valid (i.e. filter is True)
-        data_filter = filternode('test_datanode_append_ffill_filternode', data=pd.Series(index=[start, end2]))
-        node = datanode('test_datanode_append_ffill_node', data=initial_data, filter=data_filter)
+        data_filter = filternode('test_datanode_append_ffill_and_filter_filternode',
+                                    data=pd.Series(index=[start, end2]))
+
+        node = datanode('test_datanode_append_ffill_and_filter_datanode',
+                                    data=initial_data,
+                                    filter=data_filter,
+                                    ffill=True)
 
         ctx = MDFContext()
 
@@ -170,20 +208,20 @@ class NodeTest(unittest.TestCase):
             ctx.set_date(dt)
             actual.append(ctx[node])
 
+        self.assertEquals(actual, ([1.31967] * len(dr1)))
+
         # do an update for the single point pd.Timestamp('20160802 055000')
         # NB. there is a gap: we didn't get an update for pd.Timestamp('20160802 054000')
         update_date = pd.Series(index=[pd.Timestamp('20160802 055000')], data=[1.056562])
         node.append(update_date, ctx)
 
         # continue running the clock until end2
-        # NB. 1. missing point 054000 should be ffill - it is
-        #     2. updated point 055000 should be ignored (filter is False at this point) and the previous ffill - it is
-        #     3. point 060000 is valid (filter is True at this point) and should be ffill from 054000? - but it's np.nan
+        # 1. the value doesn't change until 060000 because filter is false
+        # 2. the value at 060000 is forward filled from 055000
         dr2 = pd.date_range(start=pd.Timestamp('20160802 054000'), end=end2, freq='10Min')
+        actual = []
         for dt in dr2:
             ctx.set_date(dt)
             actual.append(ctx[node])
 
-        self.assertEquals(actual, [1.31967]*8)
-
-
+        self.assertEquals(actual, ([1.31967] * (len(dr2) - 1)) + [1.056562])
