@@ -260,7 +260,7 @@ class NodeTypeHandler(object):
     def __init__(self, node, filter=False, none_fill_value=None):
         self._name = node.short_name
         self._filter = node.get_filter() if filter and isinstance(node, MDFEvalNode) else None
-        self.none_fill_value = none_fill_value
+        self._none_fill_value = none_fill_value
         self._index = []
         self._labels = set()
         self._data = dict()
@@ -297,8 +297,10 @@ class NodeTypeHandler(object):
         return sorted(self._labels)
 
 class NodeListTypeHandler(NodeTypeHandler):
-    def __init__(self, node, filter=False):
-        super(NodeListTypeHandler, self).__init__(node, filter=filter)
+    def __init__(self, node, filter=False, none_fill_value=None):
+        super(NodeListTypeHandler, self).__init__(node,
+                                                  filter=filter,
+                                                  none_fill_value=none_fill_value)
 
     def _handle(self, date, value):
         # the set of labels is fixed on the first callback
@@ -306,46 +308,65 @@ class NodeListTypeHandler(NodeTypeHandler):
         self._labels = self._labels or [self._name + "." + str(i) for i in range(len(value))]
         assert len(self._labels) == len(value)
         for l, v in zip(self._labels, value):
+            if v is None:
+                v = self._none_fill_value
             self._data[(date, l)] = v
 
 class NodeDictTypeHandler(NodeTypeHandler):
-    def __init__(self, node, filter=False):
-        super(NodeDictTypeHandler, self).__init__(node, filter=filter)
+    def __init__(self, node, filter=False, none_fill_value=None):
+        super(NodeDictTypeHandler, self).__init__(node,
+                                                  filter=filter,
+                                                  none_fill_value=none_fill_value)
         
     def _handle(self, date, value):
         # the set of labels can grow over time
         # and they reflect the big union of the dict keys
         self._labels = self._labels.union(map(str, value.keys()))
         for k, v in value.items():
+            if v is None:
+                v = self._none_fill_value
             self._data[(date, str(k))] = v
 
 class NodeSeriesTypeHandler(NodeTypeHandler):
-    def __init__(self, node, filter=False):
-        super(NodeSeriesTypeHandler, self).__init__(node, filter=filter)
-        
+    def __init__(self, node, filter=False, none_fill_value=None):
+        super(NodeSeriesTypeHandler, self).__init__(node,
+                                                    filter=filter,
+                                                    none_fill_value=none_fill_value)
+
     def _handle(self, date, value):
         # the set of labels can grow over time
         # and they reflect the big union of the row labels in the
         # node value Series
         self._labels = self._labels.union(map(str, value.index))
         for l in value.index:
+            v = value[l]
+            if v is None:
+                v = self._none_fill_value
             self._data[(date, str(l))] = value[l]
 
 class NodeBaseTypeHandler(NodeTypeHandler):
     def __init__(self, node, filter=False, none_fill_value=None):
-        super(NodeBaseTypeHandler, self).__init__(node, filter=filter, none_fill_value=none_fill_value)
+        super(NodeBaseTypeHandler, self).__init__(node,
+                                                  filter=filter,
+                                                  none_fill_value=none_fill_value)
         self._labels.add(self._name)
 
     def _handle(self, date, value):
         if value is None:
-            value = self.none_fill_value
+            value = self._none_fill_value
         self._data[(date, self._name)] = value
 
 class DataFrameBuilder(object):
     # version number to provide limited backwards compatibility
     __version__ = 2
 
-    def __init__(self, nodes, contexts=None, dtype=object, sparse_fill_value=None, filter=False,
+    def __init__(self,
+                 nodes,
+                 contexts=None,
+                 dtype=object,
+                 sparse_fill_value=None,
+                 none_fill_value=None,
+                 filter=False,
                  start_date=None):
         """
         Constructs a new DataFrameBuilder.
@@ -362,7 +383,8 @@ class DataFrameBuilder(object):
         self.context_handler_dict = {}
         self.filter = filter
         self.dtype = object
-        self.sparse_fill_value = None
+        self.sparse_fill_value = sparse_fill_value
+        self.none_fill_value = none_fill_value
         self.start_date = start_date
 
         self._finalized = False
@@ -400,17 +422,24 @@ class DataFrameBuilder(object):
             handler = handler_dict.get(key)
             
             if not handler:
-                if node_value is None:
-                    handler = NodeBaseTypeHandler(node, filter=self.filter, none_fill_value=self.sparse_fill_value)
-                elif isinstance(node_value, (basestring, int, float, bool, datetime.date)) \
+                if isinstance(node_value, (basestring, int, float, bool, datetime.date, types.NoneType)) \
                 or isinstance(node_value, tuple(np.typeDict.values())):
-                    handler = NodeBaseTypeHandler(node, filter=self.filter)
+                    handler = NodeBaseTypeHandler(node,
+                                                  filter=self.filter,
+                                                  none_fill_value=self.none_fill_value)
                 elif isinstance(node_value, dict):
-                    handler = NodeDictTypeHandler(node, filter=self.filter)
+                    handler = NodeDictTypeHandler(node,
+                                                  filter=self.filter,
+                                                  none_fill_value=self.none_fill_value)
                 elif isinstance(node_value, pa.Series):
-                    handler = NodeSeriesTypeHandler(node, filter=self.filter)
-                elif isinstance(node_value, (list, tuple, deque, np.ndarray, pa.Index, pa.core.generic.NDFrame)):
-                    handler = NodeListTypeHandler(node, filter=self.filter)
+                    handler = NodeSeriesTypeHandler(node,
+                                                    filter=self.filter,
+                                                    none_fill_value=self.none_fill_value)
+                elif isinstance(node_value,
+                        (list, tuple, deque, np.ndarray, pa.Index, pa.core.generic.NDFrame)):
+                    handler = NodeListTypeHandler(node,
+                                                  filter=self.filter,
+                                                  none_fill_value=self.none_fill_value)
                 else:
                     raise Exception("Unhandled type %s for node %s" % (type(node_value), node))
 
