@@ -17,7 +17,7 @@ class _samplenode(MDFIterator):
     offset is a pandas.datetools.DateOffset instance,
     eg pandas.datetools.BMonthEnd()
     """
-    _init_kwargs_ = ["filter_node_value", "offset", "date_node", "initial_value"]
+    _init_args_ = ["value", "filter_node_value", "offset", "date_node", "initial_value"]
 
     def __init__(self, value, filter_node_value, offset, date_node=now, initial_value=None):
         self._offset = offset

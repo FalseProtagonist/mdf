@@ -124,17 +124,19 @@ class MDFCustomNode(MDFEvalNode):
     """
     # override this in a subclass if any kwargs should be passed as nodes
     # instead of being evaluated
-    nodetype_node_kwargs = set()
+    nodetype_node_kwargs = None
     
     # override this is the function being wrapped by the subclass can't
-    # be inspected (eg is a cython function) and it takes some keyword
-    # arguments.
-    nodetype_kwargs = None
+    # be inspected (eg is a cython function).
+    nodetype_args = None
 
     # if set to True on the subclass the first parameter passed to the node
     # type function will always be none and the underlying node won't be
     # evaluated.
     call_with_no_value = False
+
+    # these kwargs are reserved have a special meaning if used in a node type function
+    __special_kwargs = set(("filter_node", "filter_node_value", "owner_node"))
 
     def __init__(self,
                     func,
@@ -147,6 +149,7 @@ class MDFCustomNode(MDFEvalNode):
                     filter=None,
                     base_node=None, # set if created via MDFCustomNodeMethod
                     base_node_method_name=None,
+                    nodetype_func_args=tuple(),
                     nodetype_func_kwargs={}):
         if isinstance(func, MDFCustomNodeIteratorFactory):
             node_type_func = func.node_type_func
@@ -156,16 +159,53 @@ class MDFCustomNode(MDFEvalNode):
         self._node_type_func = node_type_func
         self._cn_func = self._validate_func(func)
         self._category = category
-        self._kwargs = dict(nodetype_func_kwargs)
-        self._kwnodes = dict([(k, v) for (k, v) in dict_iteritems(nodetype_func_kwargs) if isinstance(v, MDFNode)])
+
+        # get the arg names from the node function (the first is always the target node value)
+        args = self._get_nodetype_func_args()
+        assert len(args) >= 1, "Node type functions must take at least one argument"
+
+        # combine the nodetype_func_args into kwargs using the arg names
+        self._kwargs = dict(zip(args[1:], nodetype_func_args))
+        self._kwargs.update(nodetype_func_kwargs)
+
+        self._kwnodes = dict([(k, v) for (k, v) in dict_iteritems(self._kwargs) if isinstance(v, MDFNode)])
         self._kwfuncs = {} # reserved for functions added via decorators
 
         # if 'filter_node_value' is in the node type generator args we pass in the value of the filter
-        kwargs = self._get_nodetype_func_kwargs(False)
-        self._call_with_filter_node = "filter_node" in kwargs
-        self._call_with_filter = "filter_node_value" in kwargs
-        self._call_with_self = "owner_node" in kwargs
+        arg_set = set(args)
+        self._call_with_filter_node = "filter_node" in arg_set
+        self._call_with_filter = "filter_node_value" in arg_set
+        self._call_with_self = "owner_node" in arg_set
         self._call_with_no_value = self.call_with_no_value
+
+        # Add any kwargs that end with "_node" to the set of nodes to be passed to the nodetype func
+        # without first being evaluated.
+        self._nodetype_node_kwargs = set(self.nodetype_node_kwargs or [])
+        for arg in args:
+            if arg.endswith("_node"):
+                self._nodetype_node_kwargs.add(arg)
+
+        # check any node kwargs are actually nodes
+        for arg in self._nodetype_node_kwargs:
+            value = self._kwargs.get(arg)
+            if value is not None:
+                assert isinstance(value, MDFNode), "Expected a node for '%s', got %s" % (arg, value)
+
+        # check the first argument and see if it needs a node rather than a value
+        self._call_with_node = args[0].endswith("_node")
+        if self._call_with_node:
+            # self._value_node is used as we don't want to set self._base_node is there's
+            # not actually a base node, as that would break serialization.
+            self._value_node = self._base_node
+
+            # if we need a value node but there's no base node create a new node
+            if self._value_node is None:
+                self._value_node = MDFEvalNode(self._cn_func,
+                                               name=(name or self._get_func_name(func)) + "_value_",
+                                               short_name=short_name + "_value_" if short_name else None,
+                                               fqname=fqname + "_value_" if fqname else None,
+                                               category=category,
+                                               filter=filter)
 
         eval_func = self._cn_eval_func
         if _isgeneratorfunction(node_type_func) or _isgeneratorfunction(func):
@@ -204,16 +244,16 @@ class MDFCustomNode(MDFEvalNode):
             None,
         )
 
-    def _get_nodetype_func_kwargs(self, remove_special=True):
-        """return a list of named arguments for the node type function"""
-        kwargs = self.nodetype_kwargs
+    def _get_nodetype_func_args(self):
+        """return an ordered list of named arguments for the node type function"""
+        kwargs = self.nodetype_args
 
         if kwargs is None:
             # try and get them from the func/iterator object
             node_type_func = self._node_type_func
             argspec = None
             try:
-                kwargs = node_type_func._init_kwargs_
+                kwargs = node_type_func._init_args_
             except AttributeError:
                 init_kwargs = None
 
@@ -224,17 +264,11 @@ class MDFCustomNode(MDFEvalNode):
             try:
                 argspec = inspect.getargspec(node_type_func).args
             except TypeError:
-                return []
-            kwargs = argspec[1:]
-
-        # remove 'special' kwargs
-        if remove_special:
-            for special in ("filter_node", "filter_node_value", "owner_node"):
-                if special in kwargs:
-                    kwargs = list(kwargs)
-                    kwargs.remove(special)
+                return ["_unknown_"]
+            kwargs = list(argspec)
 
         return kwargs
+
 
     def __getattr__(self, attr):
         # give the superclass a go first
@@ -249,7 +283,7 @@ class MDFCustomNode(MDFEvalNode):
         if attr.startswith("_") or self._node_type_func is None:
             raise AttributeError(attr)
 
-        kwargs = self._get_nodetype_func_kwargs()
+        kwargs = [a for a in self._get_nodetype_func_args()[1:] if a not in self.__special_kwargs]
         if attr not in kwargs:
             raise AttributeError(attr)
 
@@ -387,10 +421,10 @@ class MDFCustomNode(MDFEvalNode):
 
             node = cython.declare(MDFNode)
             for key, node in dict_iteritems(self._kwnodes):
-                if key not in self.nodetype_node_kwargs:
-                    kwargs[key] = node()
-                else:
+                if key in self._nodetype_node_kwargs:
                     kwargs[key] = node
+                else:
+                    kwargs[key] = node()
 
             for key, value in dict_iteritems(self._kwfuncs):
                 kwargs[key] = value()
@@ -416,6 +450,8 @@ class MDFCustomNode(MDFEvalNode):
         # get the inner node value
         if self._call_with_no_value:
             value = None
+        elif self._call_with_node:
+            value = self._value_node
         else:
             value = self._cn_func()
 
@@ -471,10 +507,10 @@ class MDFCustomNodeMethod(object):
 
     def __repr__(self):
         # try to get the args directly from the iterator (if it is one)
-        args = self._node_cls.nodetype_kwargs
+        args = self._node_cls.nodetype_args
         if args is None:
             try:
-                args = self._node_type_func._init_kwargs_
+                args = self._node_type_func._init_args_[1:]
             except AttributeError:
                 args = None
 
@@ -497,17 +533,19 @@ class MDFCustomNodeMethod(object):
                                                          args)
         return "<unbound MDFCustomNodeMethod %s(%s)>" % (self._method_name, args)                                                         
 
-    def __call__(self,
-                    name=None,
-                    short_name=None,
-                    filter=None,
-                    category=None,
-                    **kwargs):
+    def __call__(self, *args, **kwargs):
+        # extract 'special' kwargs used to construct the node, not passed to the node func.
+        name = kwargs.pop("name", None)
+        short_name = kwargs.pop("short_name", None)
+        filter = kwargs.pop("filter", None)
+        category = kwargs.pop("category", None)
+
         # get the derived node and call it
         derived_node = self._get_derived_node(name=name,
                                               short_name=short_name,
                                               filter=filter,
                                               category=category,
+                                              nodetype_func_args=args,
                                               nodetype_func_kwargs=kwargs)
         if self._call:
             return derived_node()
@@ -518,6 +556,7 @@ class MDFCustomNodeMethod(object):
                             short_name=None,
                             filter=None,
                             category=None,
+                            nodetype_func_args=tuple(),
                             nodetype_func_kwargs={}):
         """
         return a new or cached node made from the base node with
@@ -531,6 +570,7 @@ class MDFCustomNodeMethod(object):
                             self._node_cls,
                             filter,
                             category,
+                            nodetype_func_args,
                             frozenset(dict_iteritems(nodetype_func_kwargs)))
         try:
             derived_node = self._derived_nodes[derived_node_key]
@@ -547,6 +587,16 @@ class MDFCustomNodeMethod(object):
                 if filter is not None:
                     kwargs["filter"] = filter
 
+                arg_strs = [None] * len(nodetype_func_args)
+                short_arg_strs = [None] * len(nodetype_func_args)
+                for i, a in enumerate(nodetype_func_args):
+                    as_ = a
+                    if isinstance(a, MDFNode):
+                        as_ = a.short_name
+                        a = a.name
+                    arg_strs[i] = str(a)
+                    short_arg_strs[i] = str(as_)
+
                 kwarg_strs = [None] * len(kwargs)
                 short_kwarg_strs = [None] * len(kwargs)
                 for i, (k, v) in enumerate(sorted(kwargs.items())):
@@ -557,11 +607,11 @@ class MDFCustomNodeMethod(object):
                     kwarg_strs[i] = "%s=%s" % (k, v)
                     short_kwarg_strs[i] = "%s=%s" % (k, vs)
     
-                args = ", ".join(kwarg_strs)
+                args = ", ".join(arg_strs + kwarg_strs)
                 name = "%s.%s(%s)" % (self._node.name, self._method_name, args)
 
                 if short_name is None:
-                    short_args = ", ".join(short_kwarg_strs)
+                    short_args = ", ".join(short_arg_strs + short_kwarg_strs)
                     short_name = "%s.%s(%s)" % (self._node.short_name,
                                                 self._method_name,
                                                 short_args)
@@ -575,6 +625,7 @@ class MDFCustomNodeMethod(object):
                                           base_node=self._node,
                                           base_node_method_name=self._method_name,
                                           filter=filter,
+                                          nodetype_func_args=nodetype_func_args,
                                           nodetype_func_kwargs=nodetype_func_kwargs)
 
             # update the docstring
@@ -652,7 +703,7 @@ class MDFCustomNodeDecorator(object):
         return node
 
 
-def nodetype(func=None, cls=MDFCustomNode, method=None):
+def nodetype(func=None, cls=MDFCustomNode, method=None, node_method=None):
     """
     decorator for creating a custom node type::
 
@@ -717,9 +768,13 @@ def nodetype(func=None, cls=MDFCustomNode, method=None):
 
         # can be re-written as:
         y = x.my_nodetype_method(scale=10)
+
+    An additional method is added to access the node, rather than the node's
+    value. The name can be set using the 'node_method' kwarg, otherwise the
+    node method will be 'method' appended with "node".
     """
     if func is None:
-        return lambda func: nodetype(func, cls, method)
+        return lambda func: nodetype(func, cls, method, node_method)
 
     # set a new method on MDFNode if required
     if method is not None:
@@ -728,7 +783,10 @@ def nodetype(func=None, cls=MDFCustomNode, method=None):
         MDFNode._additional_attrs_[method] = method_func
 
         # add another method to access the node
+        if node_method is None:
+            node_method = method + "node"
+
         getnode_func = MDFCustomNodeMethod(func, cls, method, call=False)
-        MDFNode._additional_attrs_[method + "node"] = getnode_func
+        MDFNode._additional_attrs_[node_method] = getnode_func
 
     return MDFCustomNodeDecorator(func, cls)

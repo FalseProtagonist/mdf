@@ -7,12 +7,13 @@ written using mdf.
 from ._nodetypes import MDFCustomNode, nodetype
 from ..nodes import MDFNode
 
-# uncomment if running without cython
-#from ._nodetypes import dict_iteritems
+# PURE PYTHON START
+from ._nodetypes import dict_iteritems
+# PURE PYTHON END
 
 
 class MDFApplyNode(MDFCustomNode):
-    nodetype_kwargs = ["func", "args", "kwargs"]
+    nodetype_args = ["value", "func", "args", "kwargs"]
 
 
 def _applynode(value, func, args=(), kwargs={}):

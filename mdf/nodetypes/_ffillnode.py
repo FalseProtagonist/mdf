@@ -35,7 +35,7 @@ class _ffillnode(MDFIterator):
         def node():
             return some_value.ffill()
     """
-    _init_kwargs_ = ["filter_node_value", "initial_value"]
+    _init_args_ = ["value", "filter_node_value", "initial_value"]
 
     def __init__(self, value, filter_node_value, initial_value=None):
         self.is_float = False

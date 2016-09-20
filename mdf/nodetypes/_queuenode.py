@@ -45,7 +45,7 @@ class _queuenode(MDFIterator):
         def node():
             return some_value.queue(size=5)
     """
-    _init_kwargs_ = ["filter_node_value", "size", "as_list"]
+    _init_args_ = ["value", "filter_node_value", "size", "as_list"]
 
     def __init__(self, value, filter_node_value, size=None, as_list=False):
         if size is not None:

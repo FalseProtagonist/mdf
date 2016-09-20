@@ -113,7 +113,7 @@ class _rowiternode(MDFIterator):
             # get the row from dataframe_node for the current_date 'now'
             current_row = dataframe_node.rowiter()
     """
-    _init_kwargs_ = ["owner_node", "index_node", "missing_value", "delay", "ffill"]
+    _init_args_ = ["data", "owner_node", "index_node", "missing_value", "delay", "ffill"]
 
     def __init__(self,
                  data,

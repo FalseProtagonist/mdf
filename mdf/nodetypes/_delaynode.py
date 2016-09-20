@@ -233,7 +233,7 @@ class _delaynode(MDFIterator):
         def node():
             return some_value.delay(periods=5)
     """
-    _init_kwargs_ = ["filter_node_value", "periods", "initial_value", "lazy", "ffill"]
+    _init_args_ = ["value", "filter_node_value", "periods", "initial_value", "lazy", "ffill"]
 
     def __init__(self, value, filter_node_value, periods=1,
                  initial_value=None, lazy=False, ffill=False):

@@ -8,7 +8,7 @@ from ._nodetypes import MDFCustomNode, nodetype
 # suitable for filtering data, ie. the filter kwarg to evalnode(filter=...)
 #
 class FilteredNode(MDFCustomNode):
-    nodetype_kwargs = []
+    nodetype_args = ["value"]
 
 
     def _cn_eval_func(self):

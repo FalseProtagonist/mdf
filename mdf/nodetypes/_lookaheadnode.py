@@ -15,7 +15,7 @@ import cython
 
 
 class MDFLookAheadNode(MDFCustomNode):
-    nodetype_kwargs = ["value", "owner_node", "periods", "filter_node", "offset"]
+    nodetype_args = ["value_unused", "owner_node", "periods", "filter_node", "offset"]
 
     # don't mark this node as dirty when dependent nodes are dirtied
     # because of changes to the current date.

@@ -7,19 +7,22 @@ cdef class MDFCustomNode(MDFEvalNode):
     cdef MDFNode _base_node
     cdef object _base_node_method_name
     cdef object _node_type_func
+    cdef MDFNode _value_node
     cdef object _cn_func
     cdef object _category
     cdef int _call_with_filter_node
     cdef int _call_with_filter
     cdef int _call_with_self
+    cdef int _call_with_node
     cdef int _call_with_no_value
+    cdef object _nodetype_node_kwargs  # set of arg names that should be passed as nodes
     cdef dict _kwargs
     cdef dict _kwnodes
     cdef dict _kwfuncs
 
     # internal C methods
     cdef inline dict _get_kwargs(self)
-    cdef _get_nodetype_func_kwargs(self, int remove_special=?)
+    cdef _get_nodetype_func_args(self)
 
     # protected python methods
     cpdef _cn_eval_func(self)

@@ -36,7 +36,7 @@ class _cumprodnode(MDFIterator):
     TODO: That node needs a test for the argument skipna, since it is not entirely clear what it should do if the first value is na.
     It would be nice to be able to specify an initial value.
     """
-    _init_kwargs_ = ["filter_node_value", "skipna"]
+    _init_args_ = ["value", "filter_node_value", "skipna"]
 
     def __init__(self, value, filter_node_value, skipna=True):
         self.is_float = False

@@ -40,7 +40,7 @@ class _returnsnode(MDFIterator):
     ideally would be called 'return', but that's a keyword and so returns is
     used.
     """
-    _init_kwargs_ = ["filter_node_value"]
+    _init_args_ = ["value", "filter_node_value"]
 
     def __init__(self, value, filter_node_value):
         self.is_float = False
