@@ -14,8 +14,9 @@ from ..nodes import (
     now,
 )
 
-# needed in pure-python mode
-#from ._nodetypes import dict_iteritems
+# PURE PYTHON START
+from ._nodetypes import dict_iteritems
+# PURE PYTHON END
 
 
 __all__ = [
@@ -114,7 +115,14 @@ class _rowiternode(MDFIterator):
     """
     _init_kwargs_ = ["owner_node", "index_node", "missing_value", "delay", "ffill"]
 
-    def __init__(self, data, owner_node, index_node=now, missing_value=np.nan, delay=0, ffill=False):
+    def __init__(self,
+                 data,
+                 owner_node,
+                 index_node=now,
+                 index_node_type=None,
+                 missing_value=np.nan,
+                 delay=0,
+                 ffill=False):
         """data should be a dataframe, widepanel or timeseries"""
         self._owner_node = owner_node
         self._current_index = None
@@ -127,11 +135,13 @@ class _rowiternode(MDFIterator):
         # data can be appended to - keep track of the first data block and any subsequent blocks
         self._initial_data = data
         self._appended_data = []
-        self._appended_data_index = 0
+        self._appended_data_index = -1
 
         # call the index node to make sure this node depends on it and remember the type
-        index_value = index_node()
-        self._index_node_type = type(index_value)
+        if index_node_type is None:
+            index_value = index_node()
+            index_node_type = type(index_value)
+        self._index_node_type = index_node_type
 
         # store the node and delay it if necessary
         self._index_node = index_node
@@ -229,12 +239,12 @@ class _rowiternode(MDFIterator):
                               and self._index_node_type is datetime.datetime
 
     def send(self, data):
-        if data is not self._initial_data:
+        if data is not self._initial_data:# and (data != self._initial_data).any():
             # clear the previous data and any appended data and restart with
             # the new dataframe/series etc
             self._set_data(data, True)
             self._appended_data = []
-            self._appended_data_index = 0
+            self._appended_data_index = -1
         return self.next()
 
     def next(self):
@@ -248,6 +258,16 @@ class _rowiternode(MDFIterator):
         if self._is_series:
             return self._next_series()
         return self._missing_value
+
+    def _advance_block(self):
+        """if data has been appended get the next block and return True"""
+        next_index = cython.declare(int)
+        next_index = self._appended_data_index + 1
+        if next_index < len(self._appended_data):
+            self._set_data(self._appended_data[next_index], False)
+            self._appended_data_index = next_index
+            return True
+        return False
 
     def _next_dataframe(self):
         i = self._index_node()
@@ -267,9 +287,7 @@ class _rowiternode(MDFIterator):
                 self._current_value = self._data.xs(self._current_index)
             except StopIteration:
                 # If another block of data has been appended switch to that
-                if self._appended_data_index < len(self._appended_data):
-                    self._set_data(self._appended_data[self._appended_data_index], False)
-                    self._appended_data_index += 1
+                if self._advance_block():
                     continue
 
                 # otherwise we're at the end of the data
@@ -303,9 +321,7 @@ class _rowiternode(MDFIterator):
                 self._current_value = self._data.major_xs(self._current_index)
             except StopIteration:
                 # If another block of data has been appended switch to that
-                if self._appended_data_index < len(self._appended_data):
-                    self._set_data(self._appended_data[self._appended_data_index], False)
-                    self._appended_data_index += 1
+                if self._advance_block():
                     continue
 
                 # otherwise we're at the end of the data
@@ -337,9 +353,7 @@ class _rowiternode(MDFIterator):
                 self._current_index, self._current_value = next(self._iter)
             except StopIteration:
                 # If another block of data has been appended switch to that
-                if self._appended_data_index < len(self._appended_data):
-                    self._set_data(self._appended_data[self._appended_data_index], False)
-                    self._appended_data_index += 1
+                if self._advance_block():
                     continue
 
                 # otherwise we're at the end of the data
@@ -379,6 +393,65 @@ class _rowiternode(MDFIterator):
 
         # add the data
         self._appended_data.append(data)
+
+    def __reduce__(self):
+        """support for pickling"""
+        return (
+            _unpickle,
+            _pickle(self),
+            None,
+            None,
+            None,
+        )
+
+
+def _pickle(self_):
+    self = cython.declare(_rowiternode)
+    self = self_
+    return (
+        self._owner_node,
+        self._index_node,
+        self._initial_data,
+        self._appended_data,
+        self._appended_data_index,
+        self._current_index,
+        self._current_value,
+        self._prev_value,
+        self._missing_value_orig,
+        self._ffill
+    )
+
+
+def _unpickle(owner_node,
+              index_node,
+              initial_data,
+              appended_data,
+              appended_data_index,
+              current_index,
+              current_value,
+              prev_value,
+              missing_value,
+              ffill):
+    # no need to specify delay as the index node will already be delayed as necessary
+    self = cython.declare(_rowiternode)
+    self = _rowiternode(initial_data,
+                        owner_node,
+                        index_node=index_node,
+                        index_node_type=type(current_index),
+                        missing_value=missing_value,
+                        ffill=ffill)
+
+    # restore the position of the iterator
+    self._current_index = current_index
+    self._current_value = current_value
+    self._prev_value = prev_value
+    self._appended_data = appended_data
+
+    while self._appended_data_index < appended_data_index:
+        if not self._advance_block():
+            raise Exception("Error unpickling datanode - not enough appended data blocks")
+
+    return self
 
 
 # decorators don't work on cythoned types

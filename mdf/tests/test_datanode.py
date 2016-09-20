@@ -1,8 +1,14 @@
-from mdf import MDFContext, datanode, DIRTY_FLAGS, now, filternode
+from mdf import MDFContext, datanode, DIRTY_FLAGS, now, filternode, varnode, rowiternode
 import datetime as dt
 import pandas as pd
 import numpy as np
 import unittest
+import pickle
+
+ffill_datanode_data = varnode()
+ffill_datanode_filter = varnode()
+ffill_datanode_filternode = filternode('ffill_datanode_filternode', data=ffill_datanode_filter)
+ffill_datanode = datanode('ffill_datanode', data=ffill_datanode_data, filter=ffill_datanode_filternode, ffill=True)
 
 
 class NodeTest(unittest.TestCase):
@@ -12,6 +18,15 @@ class NodeTest(unittest.TestCase):
         self.daterange2 = pd.bdate_range(dt.datetime(1970, 1, 11), dt.datetime(1970, 1, 20))
         self.daterange3 = pd.bdate_range(dt.datetime(1970, 1, 21), dt.datetime(1970, 1, 30))
         self.ctx = MDFContext()
+
+    def _run_for_daterange(self, date_range, *nodes):
+        for t in date_range:
+            self.ctx.set_date(t)
+            for node in nodes:
+                self.ctx[node]
+
+    def _run(self, *nodes):
+        self._run_for_daterange(self.daterange, *nodes)
 
     def test_datanode_ffill(self):
         data = pd.Series(range(len(self.daterange)), self.daterange, dtype=float)
@@ -110,15 +125,6 @@ class NodeTest(unittest.TestCase):
         data2 = pd.Series(range(len(self.daterange)), self.daterange, dtype=float)
         self.assertRaises(Exception, node.append, data2, ctx=self.ctx)
 
-    def _run_for_daterange(self, date_range, *nodes):
-        for t in date_range:
-            self.ctx.set_date(t)
-            for node in nodes:
-                self.ctx[node]
-
-    def _run(self, *nodes):
-        self._run_for_daterange(self.daterange, *nodes)
-
     def test_datanode_in_class_append(self):
         class X(object):
             def __init__(self, initial_data):
@@ -192,28 +198,22 @@ class NodeTest(unittest.TestCase):
 
         # The datanode filter spans pd.date_range(start=start, end=end2, freq='10Min'), i.e. the whole
         # date range of interest, but only the first and last points are valid (i.e. filter is True)
-        data_filter = filternode('test_datanode_append_ffill_and_filter_filternode',
-                                    data=pd.Series(index=[start, end2]))
-
-        node = datanode('test_datanode_append_ffill_and_filter_datanode',
-                                    data=initial_data,
-                                    filter=data_filter,
-                                    ffill=True)
-
         ctx = MDFContext()
+        ctx[ffill_datanode_filter] = pd.Series(index=[start, end2])
+        ctx[ffill_datanode_data] = initial_data
 
         # run the clock and collect the output
         actual = []
         for dt in dr1:
             ctx.set_date(dt)
-            actual.append(ctx[node])
+            actual.append(ctx[ffill_datanode])
 
         self.assertEquals(actual, ([1.31967] * len(dr1)))
 
         # do an update for the single point pd.Timestamp('20160802 055000')
         # NB. there is a gap: we didn't get an update for pd.Timestamp('20160802 054000')
         update_date = pd.Series(index=[pd.Timestamp('20160802 055000')], data=[1.056562])
-        node.append(update_date, ctx)
+        ffill_datanode.append(update_date, ctx)
 
         # continue running the clock until end2
         # 1. the value doesn't change until 060000 because filter is false
@@ -222,6 +222,63 @@ class NodeTest(unittest.TestCase):
         actual = []
         for dt in dr2:
             ctx.set_date(dt)
-            actual.append(ctx[node])
+            actual.append(ctx[ffill_datanode])
 
         self.assertEquals(actual, ([1.31967] * (len(dr2) - 1)) + [1.056562])
+
+    def test_datanode_pickle(self):
+        # ffill fills forward missing values, not values that are nan
+        start1 = pd.Timestamp('20160917 000000')
+        end1 = pd.Timestamp('20160917 000900')
+        start2 = pd.Timestamp('20160917 001000')
+        end2 = pd.Timestamp('20160917 001900')
+        ix1 = pd.date_range(start=start1, end=end1, freq='1Min')
+        ix2 = pd.date_range(start=start2, end=end2, freq='1Min')
+        dr1 = pd.date_range(start=start1, end=end1, freq='1Min')
+        dr2 = pd.date_range(start=start2, end=end2, freq='1Min')
+
+        # 0 nan 2 nan 4 nan 6 nan 8 nan
+        data1 = pd.Series(index=[x for (i, x) in enumerate(ix1) if i % 2 == 0],
+                          data=[i for (i, x) in enumerate(ix1) if i % 2 == 0])
+
+        # Start the second data set with a missing value to check
+        # it fills forward from the previous data.
+        # nan 1 nan 3 nan 5 nan 7 nan 9
+        data2 = pd.Series(index=[x for (i, x) in enumerate(ix2) if i % 2 != 0],
+                          data=[i for (i, x) in enumerate(ix2) if i % 2 != 0])
+
+        ctx = MDFContext()
+        ctx[ffill_datanode_filter] = pd.Series(0, index=pd.date_range(start=start1, end=end2, freq='1Min'))
+        ctx[ffill_datanode_data] = data1
+
+        expected1 = [0, 0, 2, 2, 4, 4, 6, 6, 8, 8]
+        actual1 = []
+
+        for d in dr1:
+            ctx.set_date(d)
+            actual1.append(ctx[ffill_datanode])
+
+        self.assertEquals(actual1, expected1)
+
+        # add the second chunk of data and serialize
+        ffill_datanode.append(data2, ctx)
+        x = pickle.dumps(ctx)
+        new_ctx = pickle.loads(x)
+
+        # check the new context continues where we left off
+        expected2 = [8, 1, 1, 3, 3, 5, 5, 7, 7, 9]
+        actual2 = []
+
+        for d in dr2:
+            ctx.set_date(d)
+            actual2.append(ctx[ffill_datanode])
+
+        self.assertEquals(actual2, expected2)
+
+        # and the pickled context should too
+        actual_pickled = []
+        for d in dr2:
+            new_ctx.set_date(d)
+            actual_pickled.append(new_ctx[ffill_datanode])
+
+        self.assertEquals(actual_pickled, expected2)

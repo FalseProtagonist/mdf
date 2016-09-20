@@ -28,6 +28,7 @@ cdef class _rowiternode(MDFIterator):
     cdef int _index_to_date
 
     cdef _set_data(self, data, bint reset)
+    cdef bint _advance_block(self)
     cdef _get_iterator(self, data, bint advance)
     cdef _next_dataframe(self)
     cdef _next_widepanel(self)
