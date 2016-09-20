@@ -8,11 +8,11 @@ import sys
 from .common import DIRTY_FLAGS
 from . import io
 
-# this is usually cimported in context.pxd
-# uncomment if not compiling with Cython
-#from cqueue import *
-#import thread
-#PyThread_get_thread_ident = thread.get_ident
+# PURE PYTHON START (cimported in context.pxd)
+from cqueue import *
+import thread
+PyThread_get_thread_ident = thread.get_ident
+# PURE PYTHON END
 
 DIRTY_FLAGS_NONE = cython.declare(int, DIRTY_FLAGS.NONE)
 DIRTY_FLAGS_ALL  = cython.declare(int, DIRTY_FLAGS.ALL)

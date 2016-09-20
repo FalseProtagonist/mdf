@@ -13,10 +13,10 @@ from .parser import tokenize, get_assigned_node_name
 from context import MDFContext, MDFNodeBase
 from common import DIRTY_FLAGS
 
-# these are cimported in nodes.pxd
-# uncomment if not compiling with Cython
-#from context import _get_current_context, _get_context, _profiling_enabled
-#from cqueue import *
+# PURE PYTHON START (cimported in nodes.pxd)
+from context import _get_current_context, _get_context, _profiling_enabled
+from cqueue import *
+# PURE PYTHON END
 
 _logger = logging.getLogger(__name__)
 _trace_enabled = cython.declare(int, False)

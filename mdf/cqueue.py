@@ -51,9 +51,10 @@ class cqueue(object):
                                                     key=key,
                                                     reverse=reverse)
 
-"""
-#
-# Uncomment this code to debug mdf without any compiled extensions.
+
+# PURE PYTHON START
+
+# This code allows running mdf without any compiled extensions.
 # (usually it's enough to compile cqueue.pyd and leave the others)
 #
 from collections import deque
@@ -70,6 +71,6 @@ cqueue_clear = lambda q: q.clear()
 def cqueue_sort(queue, key, reverse):
     sorted_queue = sorted(queue, key=key, reverse=reverse)
     queue.clear()
-    queue.extend(sorted_queue) 
-"""
+    queue.extend(sorted_queue)
 
+# PURE PYTHON END
