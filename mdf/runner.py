@@ -56,12 +56,13 @@ def run(date_range,
         values={},
         shifts=None,
         filter=None,
+        reset=True,
         ctx=None,
         num_processes=0,
         tzinfo=None,
         **kwargs):
     """
-    creates a context and iterates through the dates in the
+    Creates a context and iterates through the dates in the
     date range updating the context and calling the callbacks
     for each date.
 
@@ -77,6 +78,22 @@ def run(date_range,
 
     Any time-dependent nodes are reset before starting by setting the context's
     date to datetime.min (after applying time zone information if available).
+
+    :param date_range: Iterable of datetimes to run for.
+    :param callbacks: Set of callable objects to call on each time step.
+    :param values: Values for varnodes to set when initializing the context.
+    :param shifts: Set of shift sets to be applied to the base context.
+    :param filter: Node to use as a filter. If not None, the callbacks will only be
+                   called when the value of the filter is True.
+    :param reset: If True (default) the context will be reset before starting. This
+                  means any iterator/generator nodes will be restarted.
+    :param ctx: Context the evaluations will be performed in. If None a context
+                will be created.
+    :param num_processes: If running with shift sets this sets the maximum number of
+                          processes to use. The default (0) is to only use the current
+                          process.
+    :param tzinfo: Timezone of the dates used.
+    :param kwargs: Additional values to set in the base context.
     """
     unshifted_ctx = _create_context(date_range[0], values, ctx, **kwargs)
     contexts = [unshifted_ctx]
@@ -84,10 +101,6 @@ def run(date_range,
     generators_per_ctx = {}
 
     profiling_enabled = _profiling_is_enabled()
-
-    # The time to use for resetting time dependent nodes. 
-    # Note: strftime() methods requires year >= 1900 
-    adj_datetime_min = datetime(1900, 1, 1)
 
     # Attempt to guess the tzinfo from the date range if one isn't specified explicitly
     if tzinfo is None:
@@ -98,9 +111,11 @@ def run(date_range,
             # In a list of dates, look at the first item
             tzinfo = date_range[0].tzinfo
 
-    # ensure that any time-dependent nodes are reset before running through
+    # Ensure that any time-dependent nodes are reset before running through
     # the date range by setting the current date on the context to the default.
-    unshifted_ctx.set_date(adj_datetime_min if tzinfo is None else _localize(adj_datetime_min, tzinfo))
+    if reset:
+        adj_datetime_min = datetime(1900, 1, 1)  # strftime() methods requires year >= 1900
+        unshifted_ctx.set_date(adj_datetime_min if tzinfo is None else _localize(adj_datetime_min, tzinfo))
 
     if shifts:
         if num_processes > 0:
