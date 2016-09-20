@@ -8,3 +8,4 @@
 build
 mdf.egg-info
 .cache
+*.cython.py

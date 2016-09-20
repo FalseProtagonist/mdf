@@ -18,6 +18,11 @@ cython_profile = False
 cdebug = False
 
 
+# markers used by the preprocessor
+_pure_python_start = "PURE PYTHON START"
+_pure_python_end = "PURE PYTHON END"
+
+
 requirements = []
 with open("requirements.txt", "rb") as f:
     for line in f.readlines():
@@ -26,6 +31,39 @@ with open("requirements.txt", "rb") as f:
         if "#egg=" in line:
             line = line.split("#egg=")[-1]
         requirements.append(line.strip())
+
+
+def _preprocess(src_file):
+    """
+    Preprocess the python source files before cythoning.
+    This is to work around limitations of using cython.compiled
+    to conditionally declare code to only run when not compiled
+    as the compiler complains it can't generate code to modify
+    constants (eg conditional imports that have been cimported).
+    """
+    dest_file, ext = os.path.splitext(src_file)
+    dest_file += ".cython" + ext
+
+    if os.path.exists(dest_file) and os.stat(src_file).st_mtime < os.stat(dest_file).st_mtime:
+        return dest_file
+
+    output_lines = []
+    with open(src_file) as src_fh:
+        skip = False
+        for line in src_fh.readlines():
+            if line.startswith("#") and line.lstrip("# ").upper().startswith(_pure_python_start):
+                skip = True
+
+            if not skip:
+                output_lines.append(line)
+
+            if line.startswith("#") and line.lstrip("# ").upper().startswith(_pure_python_end):
+                skip = False
+
+    with open(dest_file, "wt") as dest_fh:
+        dest_fh.writelines(output_lines)
+
+    return dest_file
 
 
 if __name__ == "__main__":
@@ -41,7 +79,9 @@ if __name__ == "__main__":
         for file in fnmatch.filter(files, "*.pxd"):
             basename = os.path.join(dirpath, os.path.splitext(file)[0])
             module = ".".join(basename.split(os.path.sep))
-            ext_modules.append(Extension(module, [basename + ".py"]))
+            src = basename + ".py"
+            src = _preprocess(src)
+            ext_modules.append(Extension(module, [src]))
 
     for e in ext_modules:
         e.pyrex_directives = {"profile": cython_profile}
