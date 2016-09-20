@@ -143,6 +143,7 @@ def _pairs_to_node_label_lists(node_label_pairs):
     # return ([node,...], [label,...])
     return map(list, zip(*results))
 
+
 class CSVWriter(object):
     """
     callable object that appends values to a csv file
