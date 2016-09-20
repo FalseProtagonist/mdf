@@ -4,6 +4,7 @@ from setuptools import setup, find_packages
 from distutils.extension import Extension
 from Cython.Distutils import build_ext
 from glob import glob
+import fnmatch
 
 long_description = """.. -*-rst-*-
 
@@ -16,6 +17,7 @@ version = '2.2.1'
 cython_profile = False
 cdebug = False
 
+
 requirements = []
 with open("requirements.txt", "rb") as f:
     for line in f.readlines():
@@ -25,6 +27,7 @@ with open("requirements.txt", "rb") as f:
             line = line.split("#egg=")[-1]
         requirements.append(line.strip())
 
+
 if __name__ == "__main__":
 
     extra_compile_args = []
@@ -33,15 +36,12 @@ if __name__ == "__main__":
         extra_compile_args = ["/Zi"]
         extra_link_args = ["/DEBUG"]
 
-    ext_modules = [
-        Extension("mdf.context", ["mdf/context.py"]),
-        Extension("mdf.nodes", ["mdf/nodes.py"]),
-        Extension("mdf.ctx_pickle", ["mdf/ctx_pickle.py"]),
-        Extension("mdf.cqueue", ["mdf/cqueue.py"]),
-        Extension("mdf.nodetypes._nodetypes", ["mdf/nodetypes/_nodetypes.py"]),
-        Extension("mdf.nodetypes._datanode", ["mdf/nodetypes/_datanode.py"]),
-        Extension("mdf.nodetypes._filternode", ["mdf/nodetypes/_filternode.py"]),
-    ]
+    ext_modules = []
+    for dirpath, dirnames, files in os.walk("mdf"):
+        for file in fnmatch.filter(files, "*.pxd"):
+            basename = os.path.join(dirpath, os.path.splitext(file)[0])
+            module = ".".join(basename.split(os.path.sep))
+            ext_modules.append(Extension(module, [basename + ".py"]))
 
     for e in ext_modules:
         e.pyrex_directives = {"profile": cython_profile}
