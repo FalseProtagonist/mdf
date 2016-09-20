@@ -22,9 +22,9 @@ except ImportError:
 
 _log = logging.getLogger(__name__)
 
-# this is cimported in the .pxd file
-# uncomment if not compiling with Cython
-#from context import _all_nodes
+# PURE PYTHON START (cimported in ctx_pickle.pxd)
+from .context import _all_nodes
+# PURE PYTHON END
 
 # for backwards compatibility some code looks at this variable
 # to pickle in a way that's compatible with older versions
@@ -84,8 +84,10 @@ if sys.version_info[0] <= 2:
     pickle.Unpickler.dispatch[pickle.FLOAT] = load_float
     pickle.Unpickler.dispatch[pickle.BINFLOAT] = load_binfloat
 
+
 class MissingNodeError(Exception):
     pass
+
 
 class NodeStateWrapper(object):
     """
@@ -110,6 +112,7 @@ class NodeStateWrapper(object):
             None
         )
 
+
 def _pickle_context(ctx):
     """
     returns a picklable tuple of args to be passed to _unpickle_context
@@ -123,12 +126,22 @@ def _pickle_context(ctx):
 
     all_ctx_ids = [ctx.get_id()]
 
+    incrementally_updated_nodes = {
+        ctx.get_id(): ctx._incrementally_updated_nodes
+    }
+
+    nodes_requiring_set_date_callback = {
+        ctx.get_id(): ctx._nodes_requiring_set_date_callback
+    }
+
     # get the shift sets for all shifted contexts
     shift_sets = []
     for shifted_ctx in ctx.get_shifted_contexts():
         shift_set = shifted_ctx.get_shift_set()
         shift_sets.append((shifted_ctx.get_id(), shift_set))
         all_ctx_ids.append(shifted_ctx.get_id())
+        incrementally_updated_nodes[shifted_ctx.get_id()] = shifted_ctx._incrementally_updated_nodes
+        nodes_requiring_set_date_callback[shifted_ctx.get_id()] = shifted_ctx._nodes_requiring_set_date_callback
 
     # get the cached values for all nodes in any of the contexts we're interested in
     node_states = []
@@ -140,8 +153,11 @@ def _pickle_context(ctx):
     return (ctx.__class__,
             ctx.get_id(),
             ctx.get_date(),
+            incrementally_updated_nodes,
+            nodes_requiring_set_date_callback,
             node_states,
             shift_sets)
+
 
 def _get_node(name, is_bound):
     """returns a node instance from its name"""
@@ -194,7 +210,14 @@ def _get_node(name, is_bound):
     assert isinstance(obj, MDFNode)
     return obj
 
-def _unpickle_context(cls, ctx_id, now, node_states, shift_sets):
+
+def _unpickle_context(cls,
+                      ctx_id,
+                      now,
+                      incrementally_updated_nodes,
+                      nodes_requiring_set_date_callback,
+                      node_states,
+                      shift_sets):
     """
     returns an MDFContext from the pickled result of _pickle_context.
 
@@ -203,6 +226,7 @@ def _unpickle_context(cls, ctx_id, now, node_states, shift_sets):
     """
     node = cython.declare(MDFNode)
     node_state = cython.declare(NodeState)
+    ctx = cython.declare(MDFContext)
 
     root = cls(now)
 
@@ -241,7 +265,16 @@ def _unpickle_context(cls, ctx_id, now, node_states, shift_sets):
         new_ctx_id = ctx_id_fixup[ctx_id]
         node._states[new_ctx_id] = node_state
 
+    # restore the nodes requiring ... lists
+    for ctx_id, ctx in all_ctxs.iteritems():
+        ctx._incrementally_updated_nodes = incrementally_updated_nodes[ctx_id]
+        ctx._has_incrementally_updated_nodes = True if ctx._incrementally_updated_nodes else False
+
+        ctx._nodes_requiring_set_date_callback = nodes_requiring_set_date_callback[ctx_id]
+        ctx._has_nodes_requiring_set_date_callback = True if ctx._nodes_requiring_set_date_callback else False
+
     return root
+
 
 def _pickle_node_state(node_state_wrapper):
     """
@@ -264,7 +297,7 @@ def _pickle_node_state(node_state_wrapper):
     # if generator_tools can be imported then pickle the generator
     if node_state.generator is not None:
         if generator_tools is not None:
-            attribs["generator"] = generator_tools.dumps(node_state.generator)
+            attribs["generator"] = node_state.generator
         else:
             node_name = "<unknown>" if node_state_wrapper.node is None else node_state_wrapper.node.name
             _log.warn("Node '%s' is a generator and can't be pickled." % node_name)
@@ -278,6 +311,7 @@ def _pickle_node_state(node_state_wrapper):
 
     return (node_state.ctx_id, node_state.dirty_flags, attribs, extra_attribs)
 
+
 def _unpickle_node_state(ctx_id, dirty_flags, attribs, additional_attribs):
     """
     returns a NodeStateWrapper object from the picked results of _pickle_node_state
@@ -290,19 +324,14 @@ def _unpickle_node_state(ctx_id, dirty_flags, attribs, additional_attribs):
     node_state.callees = attribs["callees"]
     node_state.callers = attribs["callers"]
     node_state.override = attribs["override"]
-
-    # unpickle the generator using generator_tools
-    generator = attribs.get("generator")
-    if generator is not None:
-        assert generator_tools is not None, \
-            "A generator node was pickled with generator_tools, but generator_tools is not available."
-        node_state.generator = generator_tools.loads(generator)
+    node_state.generator = attribs.get("generator")
 
     wrapper = NodeStateWrapper(node_state)
     for attr, value in additional_attribs.iteritems():
         setattr(wrapper, attr, value)            
 
     return wrapper
+
 
 def _pickle_node(node):
     """
@@ -330,6 +359,7 @@ def _pickle_node(node):
         }
   
     return (node.name, node._modulename, node._is_bound, vardata)
+
 
 def _unpickle_node(node_name, modulename, is_bound, vardata=None):
     """returns an MDFNode object from the pickled results of _pickle_node"""
@@ -359,6 +389,7 @@ def _unpickle_node(node_name, modulename, is_bound, vardata=None):
                       category=vardata["categories"],
                       modulename=modulename)
 
+
 def _pickle_custom_node(node, base_node, base_node_method_name, kwargs):
     """
     same as _pickle_node but with the addition of kwargs
@@ -373,6 +404,7 @@ def _pickle_custom_node(node, base_node, base_node_method_name, kwargs):
                 kwargs)
 
     return (node.name, node._modulename, node._is_bound, None, None, None)
+
 
 def _unpickle_custom_node(node_name,
                           modulename,
@@ -394,8 +426,10 @@ def _unpickle_custom_node(node_name,
 
     return _unpickle_node(node_name, modulename, is_bound)
 
+
 def _pickle_shift_set(shift_set):
     return (shift_set.items(),)
+
 
 def _unpickle_shift_set(shift_set_items):
     return ShiftSet(shift_set_items)

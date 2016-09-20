@@ -9,6 +9,7 @@ from mdf import (
 import datetime as dt
 import numpy as np
 import pandas as pa
+import generator_tools
 import unittest
 import logging
 import tempfile
@@ -152,8 +153,8 @@ class PickleTest(unittest.TestCase):
 
         d = self.ctx[D]
 
-        x = pickle.dumps(self.ctx)
-        new_ctx = pickle.loads(x)
+        x = generator_tools.dumps(self.ctx)
+        new_ctx = generator_tools.loads(x)
 
         self.assertEquals(new_ctx[A], a)
         self.assertEquals(new_ctx[D], d)
