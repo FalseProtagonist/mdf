@@ -8,5 +8,5 @@ install:
     - python setup.py develop
 script:
     - pip install "pytest>=3"
-    - py.test -k 'not mdf/tests/test_remote.py' mdf/tests
-    - py.test mdf/tests/test_remote.py
+    - py.test mdf/tests
+
