@@ -744,8 +744,8 @@ def nodetype(func=None, cls=MDFCustomNode, method=None, node_method=None):
             return some_value
 
     The kwargs passed to the node decorator may be values (as shown above)
-    or nodes which will be evaluated before the node type function is
-    called.
+    or nodes which will be evaluated [#nodetypeeveal]_ before the node type
+    function is called.
 
     Nodes defined using the @nodetype decorator may be applied to 
     classmethods as well as functions and also support the standard
@@ -772,6 +772,13 @@ def nodetype(func=None, cls=MDFCustomNode, method=None, node_method=None):
     An additional method is added to access the node, rather than the node's
     value. The name can be set using the 'node_method' kwarg, otherwise the
     node method will be 'method' appended with "node".
+
+    .. [#nodetypeeveal] If a nodetype argument name ends with "_node" then
+                        then that argument *must* be a node, and the node
+                        will be passed to the node type function instead
+                        of its value. This is also true for the first argument
+                        (usually called 'value'); i.e. if 'value_node' is used
+                        then a node will be passed to the node type function.
     """
     if func is None:
         return lambda func: nodetype(func, cls, method, node_method)
