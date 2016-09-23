@@ -76,6 +76,8 @@ class MDFCustomNodeIterator(MDFIterator):
     def next(self):
         if self.custom_node._call_with_no_value:
             value = None
+        elif self.custom_node._call_with_node:
+            value = self.custom_node._value_node
         else:
             if self.is_generator:
                 if not self.value_generator:
