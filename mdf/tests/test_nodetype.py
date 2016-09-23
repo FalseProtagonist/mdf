@@ -2,8 +2,8 @@ from mdf import (
     MDFContext,
     evalnode,
     varnode,
-    nodetype
-)
+    nodetype,
+    run)
 import datetime as dt
 import unittest
 import logging
@@ -139,3 +139,41 @@ class NodeExtensionsTest(unittest.TestCase):
         actual = self.ctx[c]
 
         self.assertEqual(actual, expected)
+
+    def test_nodetype_with_generator(self):
+        from collections import deque
+        import numpy as np
+        import pandas as pd
+        from mdf import nodetype, datanode
+
+        @nodetype(method='rolling_func', node_method='rolling_func_node')
+        def rolling_func_nodetype(value, func=np.max, window=10, min_periods=10):
+            q = deque(maxlen=window)
+
+            while True:
+                if value == value:
+                    q.append(value)
+
+                if len(q) >= min_periods:
+                    value = yield func(q)
+                else:
+                    value = yield np.nan
+
+        @nodetype(method='breakout', node_method='breakout_node')
+        def breakout_nodetype(value_node):
+            value_low_0_node = value_node.rolling_func_node()
+
+            while True:
+                yield value_low_0_node()
+
+        s = pd.Series(index=pd.date_range(start=pd.Timestamp('20160101'), periods=100), data=np.random.rand(100))
+
+        s_datanode = datanode(data=s)
+        bo_node = s_datanode.breakout_node()
+
+        def func(date, ctx):
+            ctx[bo_node]
+
+        run(s.index, [func], ctx=self.ctx)
+
+
