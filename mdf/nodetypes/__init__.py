@@ -10,4 +10,5 @@ from _ffillnode import *
 from _returnsnode import *
 from _applynode import *
 from _lookaheadnode import *
+from _masknode import *
 from _operators import *
