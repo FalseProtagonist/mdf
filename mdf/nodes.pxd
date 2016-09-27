@@ -6,6 +6,7 @@ cdef int DIRTY_FLAGS_NONE
 cdef int DIRTY_FLAGS_ALL
 cdef int DIRTY_FLAGS_TIME
 
+
 cdef class NodeState(object):
     cdef object ctx_id
     cdef int dirty_flags
@@ -30,8 +31,16 @@ cdef class NodeState(object):
     cdef MDFContext prev_alt_context
     cdef object generator
 
+    # certain nodes track all values (past and future) for use by nodetypes.
+    # For example, 'now' inside 'run' has all values so that nodetypes know
+    # the timespan of the current run.
+    cdef bint has_all_values
+    cdef object all_values
+
+
 cdef class MDFIterator(object):
     cpdef next(self)
+
 
 cdef class MDFNode(MDFNodeBase):
     # from base class
@@ -60,12 +69,16 @@ cdef class MDFNode(MDFNodeBase):
     cdef MDFContext _get_alt_context(self, MDFContext ctx)
     cdef _get_value(self, MDFContext ctx, NodeState node_state)
     cdef _set_value(self, MDFContext ctx, NodeState node_state, value, int _quiet=?)
+    cdef _get_all_values(self, MDFContext ctx, NodeState node_state)
+    cdef _set_all_values(self, MDFContext ctx, NodeState node_state, values, int _quiet=?)
     cdef MDFNode _get_override(self, MDFContext ctx, NodeState node_state)
 
     # overriden from base class
     cdef MDFContext get_alt_context(self, MDFContext ctx)
     cdef _add_dependency(self, MDFContext ctx, MDFNodeBase called_node, MDFContext called_ctx)
     cdef get_value(self, MDFContext ctx, thread_id=?)
+    cdef get_all_values(self, MDFContext ctx, thread_id=?)
+    cdef set_all_values(self, MDFContext ctx, values)
 
     # semi-public API for MDFContext to use
     cpdef _get_cached_value(self, MDFContext ctx)
@@ -90,10 +103,12 @@ cdef class MDFNode(MDFNodeBase):
     cpdef MDFNode get_override(self, MDFContext ctx)
     cpdef get_state(self, MDFContext)
 
+
 cdef class MDFVarNode(MDFNode):
     cdef object _default_value
     cdef MDFContext _get_alt_context(self, MDFContext ctx)
     cdef _get_value(self, MDFContext ctx, NodeState node_state)
+
 
 cdef class MDFEvalNode(MDFNode):
     cdef object _func
@@ -108,6 +123,7 @@ cdef class MDFEvalNode(MDFNode):
     cdef _get_value(self, MDFContext ctx, NodeState node_state)
     cdef MDFContext _get_alt_context(self, MDFContext ctx)
     cdef _set_value(self, MDFContext ctx, NodeState node_state, value, int _quiet=?)
+    cdef _set_all_values(self, MDFContext ctx, NodeState node_state, values, int _quiet=?)
     cdef _fixup_alt_context(self, MDFContext ctx, NodeState node_state, MDFContext alt_ctx)
 
     # protected Python API
@@ -122,6 +138,7 @@ cdef class MDFEvalNode(MDFNode):
     cpdef get_filter(self)
     cpdef set_value(self, MDFContext ctx, value)
 
+
 cdef class MDFTimeNode(MDFVarNode):
     # C API
     cdef MDFContext _get_alt_context(self, MDFContext ctx)
@@ -129,4 +146,3 @@ cdef class MDFTimeNode(MDFVarNode):
 
     # public Python API
     cpdef set_value(self, MDFContext ctx, value)
-

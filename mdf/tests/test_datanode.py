@@ -1,9 +1,12 @@
-from mdf import MDFContext, datanode, DIRTY_FLAGS, now, filternode, varnode, rowiternode
+from mdf import MDFContext, datanode, DIRTY_FLAGS, now, filternode, varnode, run
 import datetime as dt
 import pandas as pd
 import numpy as np
 import unittest
+import logging
 import pickle
+
+logging.basicConfig(level=logging.DEBUG)
 
 ffill_datanode_data = varnode()
 ffill_datanode_filter = varnode()
@@ -42,6 +45,41 @@ class NodeTest(unittest.TestCase):
         value = self.ctx[qnode]
 
         self.assertEquals(list(value), expected.values.tolist())
+
+    def test_datanode_all_data_ffill(self):
+        data = pd.Series(range(len(self.daterange)), self.daterange, dtype=float)
+
+        data = pd.Series(range(len(self.daterange)), self.daterange, dtype=float)
+        data = data[[bool(i % 2) for i in range(len(data.index))]]
+
+        expected = data.reindex(self.daterange, method="ffill")
+        expected[np.isnan(expected)] = np.inf
+
+        node = datanode("test_datanode_all_data_ffill", data, ffill=True, missing_value=np.inf)
+
+        # run the context for the daterange without doing anything (so 'now' has a timeseries set on it)
+        run(ctx=self.ctx, date_range=self.daterange)
+
+        # cf should be the forward filled dataframe indexed by now
+        df = self.ctx._get_all_values(node)
+        self.assertEquals(df.tolist(), expected.tolist())
+
+    def test_datanode_all_data_filtered(self):
+        data = pd.Series(range(len(self.daterange)), self.daterange, dtype=float)
+        filter = pd.Series([bool(i % 2) == 0 for i in range(len(data.index))], self.daterange, dtype=bool)
+
+        expected = data[filter].reindex(self.daterange, method="ffill")
+
+        filternode = datanode("test_datanode_all_data_filtered_filter", filter)
+        node = datanode("test_datanode_all_data_filtered", data, filter=filternode)
+
+        # run the context for the daterange without doing anything (so 'now' has a timeseries set on it)
+        run(ctx=self.ctx, date_range=self.daterange)
+
+        # cf should be the forward filled dataframe indexed by now
+        df = self.ctx._get_all_values(node)
+        self.assertEquals(df.tolist(), expected.tolist())
+
 
     def test_datanode_append_series(self):
         data = pd.Series(range(len(self.daterange)), self.daterange, dtype=float)

@@ -6,6 +6,9 @@ from ._nodetypes cimport MDFCustomNode, MDFCustomNodeIterator, dict_iteritems
 cdef class MDFRowIteratorNode(MDFCustomNode):
     cpdef append(self, data, MDFContext ctx=?)
 
+    # MDFCustomNode overrides
+    cpdef _cn_get_all_values(self, MDFContext ctx, NodeState node_state)
+
 
 cdef class _rowiternode(MDFIterator):
     cdef MDFNode _owner_node
@@ -34,7 +37,8 @@ cdef class _rowiternode(MDFIterator):
     cdef _next_widepanel(self)
     cdef _next_series(self)
 
-    cpdef _append(self, data, MDFContext ctx)
+    cdef _append(self, data, MDFContext ctx)
+    cdef _get_all_values(self, MDFContext ctx)
 
     cpdef next(self)
     cpdef send(self, value)

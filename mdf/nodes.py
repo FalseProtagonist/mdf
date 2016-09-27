@@ -29,6 +29,9 @@ DIRTY_FLAGS_DATETIME = DIRTY_FLAGS.DATETIME
 DIRTY_FLAGS_ERROR = DIRTY_FLAGS.ERROR
 DIRTY_FLAGS_INVALIDATE_GENERATOR = DIRTY_FLAGS.INVALIDATE_GENERATOR
 DIRTY_FLAGS_CHANGED_MASK = DIRTY_FLAGS.CHANGED_MASK
+DIRTY_FLAGS_FUTURE_DATA = DIRTY_FLAGS.FUTURE_DATA
+DIRTY_FLAGS_DATETIME_AND_FUTURE_DATA = DIRTY_FLAGS.DATETIME | DIRTY_FLAGS.FUTURE_DATA
+
 
 # MethodWrapperType is missing from types
 MethodWrapperType = type([].__delattr__)
@@ -153,8 +156,10 @@ class NodeState(object):
         self.ctx_id = ctx_id
         self.dirty_flags = dirty_flags
         self.has_value = False
+        self.has_all_values = False
         self.date = None
         self.value = None
+        self.all_values = None
         self.alt_context = None
         self.override = None
         self.override_cache = None
@@ -862,9 +867,15 @@ class MDFNode(MDFNodeBase):
             if flags & (DIRTY_FLAGS_CHANGED_MASK & ~DIRTY_FLAGS_DATETIME):
                 node_state.has_value = False
                 node_state.value = None
+                node_state.has_all_values = False
+                node_state.all_values = None
 
             if flags & DIRTY_FLAGS_INVALIDATE_GENERATOR:
                 node_state.generator = None
+
+            if flags & DIRTY_FLAGS_FUTURE_DATA:
+                node_state.has_all_values = False
+                node_state.all_values = None
 
             # add this node's callers to the list to process
             for ctx_id, callers in node_state.callers.iteritems():
@@ -911,6 +922,108 @@ class MDFNode(MDFNodeBase):
                         caller._set_dirty(caller_state, flags, _depth+1)
                     except KeyError:
                         continue
+
+    # thread_id is passed in to avoid fetching it again later if this has to get another node value
+    def get_all_values(self, ctx, thread_id=None):
+        """
+        Gets all past and future values for this node, if available.
+
+        Depending on the node type this may involve calculating
+        the latest value.
+        """
+        node_state = cython.declare(NodeState)
+        node_state = self._get_state(ctx)
+
+        # return the cached value if nothing except datetime has changed
+        if node_state.has_all_values \
+        and node_state.dirty_flags & ~DIRTY_FLAGS_DATETIME == DIRTY_FLAGS_NONE:
+            if _trace_enabled:
+                _logger.debug("Have cached values for %s[%s]" % (self.name, ctx))
+            return node_state.all_values
+
+        # get the alt context this node should be evaluated in (i.e. the least shifted context
+        # with all the shifts this node depends on).
+        alt_ctx = cython.declare(MDFContext)
+        new_alt_ctx = cython.declare(MDFContext)
+        alt_ctx = self.get_alt_context(ctx)
+
+        # check the alt_ctx hasn't changed if it's been reset since last time
+        if node_state.prev_alt_context is not None and node_state.prev_alt_context is not alt_ctx:
+            raise ConditionalDependencyError(self, ctx, node_state.prev_alt_context, alt_ctx)
+
+        if _trace_enabled:
+            _logger.debug("Getting all values of %s[%s]" % (self.name, ctx))
+
+        try:
+            # get the value from alt_ctx if its different from the current context
+            if alt_ctx is not ctx:
+                return alt_ctx._get_node_value(self, self, ctx, thread_id)
+
+            override = cython.declare(MDFNode)
+            override = self._get_override(ctx, node_state)
+            if override is not None:
+                values = ctx._get_node_all_values(override, self, ctx, thread_id)
+                self._set_all_values(ctx, node_state, values)
+                if _trace_enabled:
+                    if values is None:
+                        _logger.debug("All values of %s[%s] are not available" % (self.name, ctx))
+                    else:
+                        _logger.debug("Retrieved values of %s[%s]" % (self.name, ctx))
+                return values
+
+            # otherwise call the subclass's _get_value and _get_all_values methods
+            value = self._get_value(ctx, node_state)
+            self._set_value(ctx, node_state, value)
+
+            values = self._get_all_values(ctx, node_state)
+            self._set_all_values(ctx, node_state, values)
+            if _trace_enabled:
+                if values is None:
+                    _logger.debug("All values of %s[%s] are not available" % (self.name, ctx))
+                else:
+                    _logger.debug("Retrieved values of %s[%s]" % (self.name, ctx))
+            return values
+        except:
+            # Clear all dirty flags
+            self._touch(node_state, DIRTY_FLAGS_ALL, True)
+
+            # Set the error flag
+            self._set_dirty(node_state, DIRTY_FLAGS_ERROR, 0)
+
+            # and re-raise
+            raise
+
+        finally:
+            # If nothing's changed this is a cheap operation as the alt_context is cached
+            new_alt_ctx = self.get_alt_context(ctx)
+
+            # check the alt_context hasn't changed after getting the value
+            # on the alt_context. This could happen is a new dependency was
+            # introduced that made this node dependent on any of the shifted
+            # nodes between ctx and alt_ctx.
+            if alt_ctx is not ctx and new_alt_ctx is not alt_ctx:
+                # if this error happens often it might be worth just re-evaluating in the
+                # new alt_ctx, but that would result in wasted valuations that could be
+                # avoided in most cases I imagine.
+                raise ConditionalDependencyError(self, ctx, alt_ctx, new_alt_ctx)
+
+            # remember the alt_context for next time
+            node_state.prev_alt_context = new_alt_ctx
+
+    def _get_all_values(self, ctx, node_state):
+        """
+        Returns the set of all values (past and future) for this node for a given context.
+
+        Depending on the node type this may involve calculating
+        the set of values.
+
+        Usually returns None to indicate all values are not available (e.g. if
+        the value is calculated iteratively or depends on other nodes where all data
+        is not available).
+
+        *override in subclass*
+        """
+        return None
 
     # thread_id is passed in to avoid fetching it again later if this has to get another node value
     def get_value(self, ctx, thread_id=None):
@@ -1091,7 +1204,22 @@ class MDFNode(MDFNodeBase):
         node_state.value = value
 
         # touch the node to reset the flags and touch and callers
-        self._touch(node_state, DIRTY_FLAGS_ALL, _quiet)
+        self._touch(node_state, DIRTY_FLAGS_ALL & ~DIRTY_FLAGS_FUTURE_DATA, _quiet)
+
+    def _set_all_values(self, ctx, node_state, values, _quiet=True):
+        """
+        Called by get_all_value to stored the cached values.
+        """
+        # set the values
+        node_state.has_all_values = True
+        node_state.all_values = values
+
+        # touch the node to reset the flags and touch and callers
+        self._touch(node_state, DIRTY_FLAGS_FUTURE_DATA, _quiet)
+
+    def set_all_values(self, ctx, values):
+        node_state = self._get_state(ctx)
+        return self._set_all_values(ctx, node_state, values, False)
 
     def _override_getter(self):
         ctx = _get_current_context()
@@ -1529,7 +1657,6 @@ class MDFEvalNode(MDFNode):
         # date look for a previous value and call the timestep func
         dirty_flags = node_state.dirty_flags
         if self._is_generator \
-        and dirty_flags & DIRTY_FLAGS_DATETIME \
         and (dirty_flags & ~DIRTY_FLAGS_INVALIDATE_GENERATOR) == dirty_flags \
         and node_state.generator is not None: 
             # if this node has been valued already for this context
@@ -1546,7 +1673,7 @@ class MDFEvalNode(MDFNode):
                 date_cmp = cython.declare(int)
                 date_cmp = 0 if prev_date == ctx._now else (-1 if prev_date < ctx._now else 1)
                 if date_cmp == 0: # prev_date == ctx._now
-                    self._touch(node_state, DIRTY_FLAGS_ALL, True)
+                    self._touch(node_state, DIRTY_FLAGS_ALL & ~DIRTY_FLAGS_FUTURE_DATA, True)
                     return prev_value
 
                 if date_cmp < 0: # prev_date < ctx._now
@@ -1602,7 +1729,7 @@ class MDFEvalNode(MDFNode):
                 if _trace_enabled:
                     _logger.debug("Re-using previous value of %s[%s]" % (self.name, ctx))
 
-                self._touch(node_state, DIRTY_FLAGS_ALL, True)
+                self._touch(node_state, DIRTY_FLAGS_ALL & ~DIRTY_FLAGS_FUTURE_DATA, True)
                 filtered_value = prev_value
                 use_filtered_value = True
 
@@ -1862,8 +1989,8 @@ class MDFTimeNode(MDFVarNode):
         return "now"
 
     def _touch(self, node_state, flags=DIRTY_FLAGS_ALL, _quiet=False, _depth=0):
-        # only set the TIME and DATE flags on dependent nodes
-        MDFVarNode._touch(self, node_state, flags & DIRTY_FLAGS_DATETIME, _quiet, _depth)
+        # only set the TIME, DATE and FUTURE_DATA flags on dependent nodes
+        MDFVarNode._touch(self, node_state, flags & DIRTY_FLAGS_DATETIME_AND_FUTURE_DATA, _quiet, _depth)
         # but clear all flags on this node
         node_state.dirty_flags &= ~flags
 

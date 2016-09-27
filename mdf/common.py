@@ -40,6 +40,8 @@ class DIRTY_FLAGS:
     # if any of these flags are set the node's iterator/generator is invalid
     INVALIDATE_GENERATOR = CHANGED_MASK & ~DATETIME
 
+    ALL_FLAGS = ["DATE", "TIME", "FUTURE_DATA", "ERROR"]
+
     @classmethod
     def to_string(cls, mask):
         if mask == cls.NONE:
@@ -48,10 +50,8 @@ class DIRTY_FLAGS:
             return "ALL"
 
         result = []
-        for x in dir(cls):
-            if x.upper() == x and x not in ("NONE", "ALL"):
-                flag = getattr(cls, x)
-                if flag & mask:
-                    result.append(x)
+        for x in cls.ALL_FLAGS:
+            flag = getattr(cls, x)
+            if flag & mask:
+                result.append(x)
         return " | ".join(result)
-

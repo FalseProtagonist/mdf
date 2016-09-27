@@ -8,11 +8,14 @@ from ..nodes import (
     MDFEvalNode,
     MDFIterator,
     MDFIteratorFactory,
+    NodeState,
     _isgeneratorfunction,
     _is_member_of,
     _get_func_name
 )
+from ..context import MDFContext
 from ..ctx_pickle import _unpickle_custom_node, _pickle_custom_node
+import numpy as np
 
 _python_version = cython.declare(int, sys.version_info[0])
 
@@ -447,6 +450,38 @@ class MDFCustomNode(MDFEvalNode):
             kwargs["owner_node"] = self
 
         return kwargs
+
+    def _get_all_values(self, ctx, node_state):
+        # if there's a filter check it has all data available
+        filter_values = None
+        filter = self.get_filter()
+        if filter is not None:
+            # can only get all data if the filter is a node
+            if not isinstance(filter, MDFNode):
+                return None
+
+            filternode = cython.declare(MDFNode)
+            filternode = filter
+            filter_values = ctx._get_all_values(filternode)
+            if filter_values is None:
+                return
+
+        values = self._cn_get_all_values(ctx, node_state)
+        if values is None:
+            return None
+
+        # apply the filter, if there is one
+        if filter_values is not None:
+            filter_values = filter_values.astype(bool)
+            values[~filter_values] = np.nan
+            mask = ~(filter_values.shift(-1) & filter_values)
+            values[~filter_values] = values[mask].fillna(method="ffill")[~filter_values]
+
+        return values
+
+    def _cn_get_all_values(self, ctx, node_state):
+        """Override in subclass if all values can be returned"""
+        return None
 
     def _cn_eval_func(self):
         # get the inner node value

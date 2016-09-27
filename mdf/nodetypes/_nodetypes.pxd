@@ -1,4 +1,4 @@
-from ..nodes cimport MDFNode, MDFEvalNode, MDFIterator
+from ..nodes cimport MDFNode, MDFEvalNode, MDFIterator, NodeState
 from ..context cimport MDFContext
 
 cdef dict_iteritems(d)
@@ -24,8 +24,13 @@ cdef class MDFCustomNode(MDFEvalNode):
     cdef inline dict _get_kwargs(self)
     cdef _get_nodetype_func_args(self)
 
+    # MDFNode overrides
+    cdef _get_all_values(self, MDFContext ctx, NodeState node_state)
+
     # protected python methods
     cpdef _cn_eval_func(self)
+    cpdef _cn_get_all_values(self, MDFContext ctx, NodeState node_state)
+
 
 cdef class MDFCustomNodeIterator(MDFIterator):
     cdef MDFCustomNode custom_node
@@ -35,4 +40,3 @@ cdef class MDFCustomNodeIterator(MDFIterator):
     cdef int is_generator
     cdef int node_type_is_generator
     cdef object node_type_generator
-

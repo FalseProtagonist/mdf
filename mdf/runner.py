@@ -2,7 +2,7 @@
 Convenience functions for creating a context and evaluating nodes
 for a range of dates and collecting the results.
 """
-from .context import MDFContext, NodeOrBuilderTimer, _profiling_is_enabled
+from .context import MDFContext, _profiling_is_enabled
 from .nodes import MDFNode
 from datetime import datetime
 import numpy as np
@@ -27,6 +27,7 @@ except ImportError:
 
 _logger = logging.getLogger(__name__)
 
+
 def _create_context(date, values={}, ctx=None, **kwargs):
     if ctx is None:
         ctx = MDFContext(date)
@@ -36,6 +37,7 @@ def _create_context(date, values={}, ctx=None, **kwargs):
     for key, value in kwargs.items():
         ctx.set_value(key, value)
     return ctx
+
 
 def _localize(dt, tzinfo):
     """
@@ -50,6 +52,7 @@ def _localize(dt, tzinfo):
         return tzinfo.localize(dt)
     except AttributeError:
         return dt.replace(tzinfo=tzinfo)
+
 
 def run(date_range,
         callbacks=[],
@@ -115,7 +118,10 @@ def run(date_range,
     # the date range by setting the current date on the context to the default.
     if reset:
         adj_datetime_min = datetime(1900, 1, 1)  # strftime() methods requires year >= 1900
+        unshifted_ctx._set_date_range(date_range)
         unshifted_ctx.set_date(adj_datetime_min if tzinfo is None else _localize(adj_datetime_min, tzinfo))
+    else:
+        unshifted_ctx._extend_date_range(date_range)
 
     if shifts:
         if num_processes > 0:
@@ -180,6 +186,7 @@ def run(date_range,
         return contexts
     return unshifted_ctx
 
+
 def _start_remote_server(argv, pipe):
     """
     function for use with multiprocessing.Process object for creating
@@ -187,6 +194,7 @@ def _start_remote_server(argv, pipe):
     """
     from .remote import start_server
     start_server(pipe=pipe)
+
 
 def _run_multiprocess(date_range, callbacks, shifts, filter, num_processes, unshifted_ctx):
     """
@@ -308,6 +316,7 @@ def _run_multiprocess(date_range, callbacks, shifts, filter, num_processes, unsh
             with remote_api:
                 remote_api.shutdown()
 
+
 @atexit.register
 def _multprocessing_exit():
     """
@@ -325,6 +334,7 @@ def _multprocessing_exit():
 
     multiprocessing.util._run_finalizers()
 
+
 def to_csv(fh, date_range, nodes, columns=None, values={}, filter=None, ctx=None, tzinfo=None, **kwargs):
     """
     evaluates a list of nodes for each date in date_range
@@ -332,6 +342,7 @@ def to_csv(fh, date_range, nodes, columns=None, values={}, filter=None, ctx=None
     """
     writer = CSVWriter(fh, nodes, columns)
     return run(date_range, [writer], values=values, filter=filter, ctx=ctx, tzinfo=tzinfo, **kwargs)
+
 
 def build_dataframe(date_range, nodes, values={}, filter=None, ctx=None, tzinfo=None, **kwargs):
     """
@@ -342,6 +353,7 @@ def build_dataframe(date_range, nodes, values={}, filter=None, ctx=None, tzinfo=
     run(date_range, [builder], values=values, filter=filter, ctx=ctx, tzinfo=tzinfo, **kwargs)
     return builder.dataframe
 
+
 def plot(date_range, nodes, values={}, filter=None, ctx=None, tzinfo=None, show=True, plot_args={}, **kwargs):
     """
     evaluates a list of nodes for each date in date_range
@@ -350,6 +362,7 @@ def plot(date_range, nodes, values={}, filter=None, ctx=None, tzinfo=None, show=
     builder = DataFrameBuilder(nodes)
     run(date_range, [builder], values=values, filter=filter, ctx=ctx, tzinfo=tzinfo, **kwargs)
     builder.plot(show=show, **plot_args)
+
 
 def get_final_values(date_range, nodes, values={}, filter=None, ctx=None, tzinfo=None, **kwargs):
     """
@@ -368,6 +381,7 @@ def get_final_values(date_range, nodes, values={}, filter=None, ctx=None, tzinfo
     if return_as_list:
         return values
     return values[0]
+
 
 def scenario(date_range,
                 result_node,
@@ -413,6 +427,7 @@ def scenario(date_range,
 
     return array
 
+
 def plot_surface(date_range,
                  result_node,
                  x_node, x_shifts,
@@ -454,6 +469,7 @@ def plot_surface(date_range,
     pp.show()
 
     return results
+
 
 def heatmap(date_range,
             result_node,

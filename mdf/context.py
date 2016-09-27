@@ -5,6 +5,7 @@ from datetime import datetime
 import cython
 import warnings
 import sys
+import pandas as pa
 from .common import DIRTY_FLAGS
 from . import io
 
@@ -19,6 +20,7 @@ DIRTY_FLAGS_ALL  = cython.declare(int, DIRTY_FLAGS.ALL)
 DIRTY_FLAGS_TIME = cython.declare(int, DIRTY_FLAGS.TIME)
 DIRTY_FLAGS_DATE = cython.declare(int, DIRTY_FLAGS.DATE)
 DIRTY_FLAGS_DATETIME = cython.declare(int, DIRTY_FLAGS.DATETIME)
+DIRTY_FLAGS_FUTURE_DATA = cython.declare(int, DIRTY_FLAGS.FUTURE_DATA)
 
 
 _python_version = cython.declare(int, sys.version_info[0])
@@ -92,7 +94,10 @@ class MDFNodeBase(object):
 
     def get_value(self, ctx, thread_id=None):
         raise NotImplementedError()
-        
+
+    def get_all_values(self, ctx, thread_id=None):
+        raise NotImplementedError()
+
     def has_value(self, ctx):
         raise NotImplementedError()
         
@@ -106,6 +111,9 @@ class MDFNodeBase(object):
         raise NotImplementedError()
 
     def set_value(self, ctx, value):
+        raise NotImplementedError()
+
+    def set_all_values(self, ctx, values):
         raise NotImplementedError()
 
     def set_override(self, ctx, override_node):
@@ -823,6 +831,40 @@ class MDFContext(object):
         finally:
             self._deactivate(cookie)
 
+    def _set_date_range(self, date_range):
+        """
+        Set the date range of all possible values of now.
+        """
+        cookie = self._activate()
+        try:
+            # 'all_values' is a series of values indexed by 'now'
+            date_range = pa.Series(date_range, index=date_range)
+
+            alt_ctx = _now_node.get_alt_context(self)
+            _now_node.set_all_values(alt_ctx, date_range)
+        finally:
+            self._deactivate(cookie)
+
+    def _extend_date_range(self, date_range):
+        """
+        Extend the date range of all possible values of now.
+        """
+        cookie = self._activate()
+        try:
+            # 'all_values' is a series of values indexed by 'now'
+            date_range = pa.Series(date_range, index=date_range)
+            alt_ctx = _now_node.get_alt_context(self)
+
+            current_values = alt_ctx._get_all_values(_now_node)
+            if current_values is not None:
+                assert current_values[-1] < date_range[0], \
+                    "Can't extend date range with dates before the current range."
+                date_range = current_values.append(date_range)
+
+            _now_node.set_all_values(alt_ctx, date_range)
+        finally:
+            self._deactivate(cookie)
+
     def _activate_ctx(self, prev_ctx=None, thread_id=None):
         return self._activate(prev_ctx, thread_id)
 
@@ -902,6 +944,66 @@ class MDFContext(object):
         
         try:
             return self._get_node_value(node)
+        finally:
+            if _profiling_enabled and timer is not None:
+                timer.resume()
+
+    def _get_node_all_values(self, node, calling_node=None, prev_ctx=None, thread_id=None):
+        alt_ctx = cython.declare(MDFContext)
+
+        # activate the context
+        cookie = self._activate(prev_ctx, thread_id)
+        prev_ctx = cookie.prev_context
+
+        # if we're in the middle of a node evaluation get
+        # the last node on the eval stack
+        if calling_node is None:
+            calling_node = self._get_calling_node(prev_ctx)
+
+        try:
+            # push this node on the stack and get its value (which we don't use, it's just
+            # to make sure it's been calculated)
+            cqueue_push(self._node_eval_stack, node)
+            try:
+                return node.get_all_values(self, thread_id)
+            finally:
+                cqueue_pop(self._node_eval_stack)
+
+                # get the context this valuation actually corresponds to
+                # (this could be something other than self if self is
+                #  shifted and this node doesn't depend on the shift)
+                alt_ctx = node.get_alt_context(self)
+
+                # add this node to the calling node's dependencies in the alt context
+                if calling_node is not None:
+                    calling_node._add_dependency(prev_ctx, node, alt_ctx)
+
+                # Getting all data for a node *doesn't* cause the node to be updated incrementally
+                # or receive the on date callback.
+                # If it's been able to pre-calculate all future values and all references to it can
+                # use those values then there's no need.
+        finally:
+            # deactivate the context
+            self._deactivate(cookie)
+
+    def _get_all_values(self, node):
+        """
+        Return all past and future values for a node, if supported by the node type.
+        This isn't available in user code, only in cythoned code such as nodetypes.
+        """
+        if _profiling_enabled:
+            stop_time = time.clock()
+            ctx = cython.declare(MDFContext)
+            ctx = self._parent or self
+            timer = cython.declare(Timer)
+            timer = None
+            if len(ctx._timer_stack) > 0:
+                timer = ctx._pause_current_timer(stop_time)
+
+        assert isinstance(node, MDFNode), "Attempted to get all values of a non-node object"
+
+        try:
+            return self._get_node_all_values(node)
         finally:
             if _profiling_enabled and timer is not None:
                 timer.resume()

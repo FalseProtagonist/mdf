@@ -35,7 +35,7 @@ DIRTY_FLAGS_FUTURE_DATA = cython.declare(int, DIRTY_FLAGS.FUTURE_DATA)
 #
 class MDFRowIteratorNode(MDFCustomNode):
     # always pass index_node as the node rather than evaluate it
-    nodetype_node_kwargs = ["index_node"]
+    nodetype_node_kwargs = ["index_node", "filter_node"]
 
 
     def append(self, data, ctx=None):
@@ -68,6 +68,17 @@ class MDFRowIteratorNode(MDFCustomNode):
 
         # mark the node as dirty for future data
         self.set_dirty(alt_ctx, DIRTY_FLAGS_FUTURE_DATA)
+
+
+    def _cn_get_all_values(self, ctx, node_state):
+        # get the row iterator from the node state
+        iterator = cython.declare(MDFCustomNodeIterator)
+        iterator = node_state.generator
+
+        rowiter = cython.declare(_rowiternode)
+        rowiter = iterator.node_type_generator
+
+        return rowiter._get_all_values(ctx)
 
 
 class _rowiternode(MDFIterator):
@@ -393,6 +404,28 @@ class _rowiternode(MDFIterator):
 
         # add the data
         self._appended_data.append(data)
+
+    def _get_all_values(self, ctx):
+        """Return a dataframe of values for every point in now's date range, if possible"""
+        index_values = ctx._get_all_values(self._index_node)
+        if index_values is None:
+            return None
+
+        # combine all the dataframes into a single object
+        df = self._initial_data
+        if self._appended_data:
+            df = pa.concat([df] + self._appended_data)
+
+        # re-index by the index node
+        fill_method = "ffill" if self._ffill else None
+        df = df.reindex(index_values.values, method=fill_method, fill_value=self._missing_value_orig)
+
+        # give it the same index as the index node (i.e. by 'now')
+        df.index = index_values.index
+
+        # filtering is handled by the base class
+        return df
+
 
     def __reduce__(self):
         """support for pickling"""
