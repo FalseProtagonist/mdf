@@ -426,7 +426,6 @@ class _rowiternode(MDFIterator):
         # filtering is handled by the base class
         return df
 
-
     def __reduce__(self):
         """support for pickling"""
         return (

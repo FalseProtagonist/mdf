@@ -45,6 +45,9 @@ index = pa.Index([datetime(2016, 9, 1),
 data = pa.Series(list(range(len(index))), index=index)
 datanode = mdf.datanode("data", data)
 
+df = pa.DataFrame({"A": list(range(len(index)))}, index=index, dtype=float)
+dfnode = mdf.datanode("df", df)
+
 mask = pa.Series([x.isoweekday() in (1, 7) for x in index], index=index)
 masknode = mdf.datanode("mask", mask)
 
@@ -66,6 +69,20 @@ class NodeFilterTest(unittest.TestCase):
         expected = [-1 if m else i for (i, m) in zip(data, mask)]
         actual = self._run(datanode.masknode(masknode, mask_value=-1))
         self.assertEqual(expected, actual)
+
+    def test_masked_df(self):
+        expected_value = pa.DataFrame({"A": [i for i in range(len(index))]}, index=index)
+        actual_value = pa.DataFrame(self._run(dfnode), index=index)
+        self.assertTrue((expected_value == actual_value).all().bool())
+
+        expected_mask = [x.isoweekday() in (1, 7) for x in index]
+        actual_mask = self._run(masknode)
+        self.assertEqual(expected_mask, actual_mask)
+
+        expected = pa.DataFrame([{"A": -1 if m else i} for (i, m) in zip(data, mask)], index=index)
+        actual = pa.DataFrame(self._run(dfnode.masknode(masknode, mask_value=-1)), index=index)
+        self.assertTrue((expected == actual).all().bool())
+
 
     def _run(self, node):
         result = []

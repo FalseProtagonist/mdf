@@ -1,6 +1,6 @@
 from ._nodetypes import MDFCustomNode, nodetype
 import numpy as np
-
+import pandas as pa
 
 
 class MDFMaskNode(MDFCustomNode):
@@ -26,6 +26,8 @@ def _masknode(value, mask, mask_value=np.nan):
     Returns 'x' on weekdays and np.nan on weekends.
     """
     if mask:
+        if isinstance(value, pa.Series):
+            return pa.Series(mask_value, index=value.index)
         return mask_value
     return value
 
