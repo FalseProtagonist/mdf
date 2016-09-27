@@ -7,4 +7,9 @@ cdef class MDFLookAheadNode(MDFCustomNode):
     cpdef on_set_date(self, MDFContext ctx, date)
 
 
-cpdef _lookaheadnode(value_unused, MDFLookAheadNode owner_node, periods, MDFNode filter_node=?, offset=?)
+cpdef _lookaheadnode(value_unused,
+                     MDFLookAheadNode owner_node,
+                     periods=?,
+                     MDFNode until=?,
+                     MDFNode filter_node=?,
+                     offset=?)
