@@ -196,19 +196,6 @@ class NodeTest(unittest.TestCase):
         self.assertTrue(np.isnan(unfilled_value).all())
         self.assertEquals(value.tolist(), [10., 10., 10., 10., 10.])
 
-    def test_lookahead_node(self):
-        B_queue = B.queuenode()
-        B_lookahead = B.lookaheadnode(periods=len(self.daterange))
-
-        self.ctx.set_date(self.daterange[0])
-        actual = self.ctx[B_lookahead]
-
-        self._run(B_queue)
-        expected = self.ctx[B_queue]
-
-        self.assertEquals(actual.values.tolist(), list(expected))
-        self.assertEquals(actual.index.tolist(), list(self.daterange))
-    
     def test_apply_node(self):
         actual_node = A.applynode(func=operator.add, args=(B,)).queuenode()
         expected_node = A_plus_B.queuenode()

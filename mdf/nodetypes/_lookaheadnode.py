@@ -15,7 +15,8 @@ import cython
 
 
 class MDFLookAheadNode(MDFCustomNode):
-    nodetype_args = ["value_unused", "owner_node", "periods", "filter_node", "offset"]
+    nodetype_args = ["value_unused", "owner_node", "periods", "until", "filter_node", "offset"]
+    nodetype_node_kwargs = ["until"]
 
     # don't mark this node as dirty when dependent nodes are dirtied
     # because of changes to the current date.
@@ -27,7 +28,7 @@ class MDFLookAheadNode(MDFCustomNode):
         return ctx.get_date() > date
 
 
-def _lookaheadnode(value_unused, owner_node, periods, filter_node=None, offset=pa.datetools.BDay()):
+def _lookaheadnode(value_unused, owner_node, periods=None, until=None, filter_node=None, offset=pa.datetools.BDay()):
     """
     Node type that creates an :py:class:`MDFNode` that returns
     a pandas Series of values of the underlying node for a sequence
@@ -52,6 +53,9 @@ def _lookaheadnode(value_unused, owner_node, periods, filter_node=None, offset=p
     :param int periods: the total number of observations to collect, excluding any that are ignored due
                         to any filter being used.
 
+    :param until: Optional node or function that controls the window used to lookahead. If specified
+                  values will be collected until the first time this node/function returns True.
+
     :param offset: date offset object (e.g. datetime timedelta or pandas date offset) to use to
                    increment the date for each sample point.
 
@@ -61,6 +65,9 @@ def _lookaheadnode(value_unused, owner_node, periods, filter_node=None, offset=p
     """
     assert owner_node.base_node is not None, \
         "lookahead nodes must be called via the lookahead or lookaheadnode methods on another node"
+
+    assert (until is not None) ^ (periods is not None), \
+        "Either periods or until must be specified, but not both."
 
     ctx = cython.declare(MDFContext)
     shifted_ctx = cython.declare(MDFContext)
@@ -76,9 +83,12 @@ def _lookaheadnode(value_unused, owner_node, periods, filter_node=None, offset=p
     dates = cython.declare(list, [])
 
     try:
-        while count < periods:
+        while count < periods if periods is not None else True:
             shifted_ctx.set_date(date)
             date += offset
+
+            if until is not None and shifted_ctx.get_value(until):
+                break
 
             if filter_node is not None:
                 if not shifted_ctx.get_value(filter_node):
