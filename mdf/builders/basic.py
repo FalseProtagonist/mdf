@@ -413,6 +413,7 @@ class DataFrameBuilder(object):
         self._version_ = self.__version__
 
         self._last_ctx = ctx.get_id()
+        self._cached_dataframes.pop(self._last_ctx, None)
 
         ctx_list = self.contexts or ([ctx] * len(self.nodes))
         for ctx_, node in zip(ctx_list, self.nodes):
@@ -483,7 +484,9 @@ class DataFrameBuilder(object):
                 pass
 
         # try and infer types for any that are currently set to object
-        return result_df.convert_objects()
+        self._cached_dataframes[ctx_id] = result_df.convert_objects()
+        return self._cached_dataframes[ctx_id]
+
 
     def _build_dataframe(self, ctx, dtype):
         """builds a dataframe from the collected data"""

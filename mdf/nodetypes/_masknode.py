@@ -25,12 +25,17 @@ def _masknode(value, mask, mask_value=np.nan):
 
     Returns 'x' on weekdays and np.nan on weekends.
     """
-    if mask:
-        if isinstance(value, pa.Series):
+    if isinstance(value, pa.Series):
+        if isinstance(mask, pa.Series):
+            value_copy = value.copy()
+            value_copy[mask] = mask_value
+            return value_copy
+        if mask:
             return pa.Series(mask_value, index=value.index)
+
+    if mask:
         return mask_value
     return value
-
 
 
 # decorators don't work on cythoned classes

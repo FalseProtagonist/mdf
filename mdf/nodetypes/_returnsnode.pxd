@@ -10,6 +10,7 @@ cdef class _returnsnode(MDFIterator):
     cdef object current_value
     cdef object prev_value
     cdef object returns
+    cdef bint use_diff
 
     cpdef next(self)
     cpdef send(self, value)

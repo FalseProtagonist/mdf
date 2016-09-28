@@ -39,10 +39,12 @@ class _returnsnode(MDFIterator):
     The value at any timestep is the return for that timestep, so the methods
     ideally would be called 'return', but that's a keyword and so returns is
     used.
-    """
-    _init_args_ = ["value", "filter_node_value"]
 
-    def __init__(self, value, filter_node_value):
+    If use_diff=True then the difference between the prices is computed instead of the rate of return.
+    """
+    _init_args_ = ["value", "filter_node_value", "use_diff"]
+
+    def __init__(self, value, filter_node_value, use_diff):
         self.is_float = False
         if isinstance(value, float):
             # floating point returns
@@ -66,6 +68,8 @@ class _returnsnode(MDFIterator):
                 self.current_value.fill(np.nan)
                 self.returns.fill(0.0)
 
+        self.use_diff = use_diff or False
+
         # update the current value
         if filter_node_value:
             self.send(value)
@@ -86,7 +90,10 @@ class _returnsnode(MDFIterator):
             if value_f == value_f:
                 self.current_value_f = value_f
 
-            self.return_f = (self.current_value_f / self.prev_value_f) - 1.0
+            if self.use_diff:
+                self.return_f = self.current_value_f - self.prev_value_f
+            else:
+                self.return_f = (self.current_value_f / self.prev_value_f) - 1.0
             if np.isnan(self.return_f):
                 self.return_f = 0.0
             return self.return_f
@@ -97,7 +104,10 @@ class _returnsnode(MDFIterator):
         self.prev_value = self.current_value.copy()
         self.current_value[mask] = value[mask]
 
-        self.returns = (self.current_value / self.prev_value) - 1.0
+        if self.use_diff:
+            self.returns = self.current_value - self.prev_value
+        else:
+            self.returns = (self.current_value / self.prev_value) - 1.0
         self.returns[np.isnan(self.returns)] = 0.0
         return self.returns
 

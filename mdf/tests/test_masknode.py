@@ -20,6 +20,7 @@ from datetime import datetime
 import unittest
 import logging
 import pandas as pa
+import numpy as np
 
 # this is necessary to stop namespace from looking
 # too far up the stack as it looks for the first frame
@@ -83,6 +84,43 @@ class NodeFilterTest(unittest.TestCase):
         actual = pa.DataFrame(self._run(dfnode.masknode(masknode, mask_value=-1)), index=index)
         self.assertTrue((expected == actual).all().bool())
 
+    def test_masked_df_mask_is_series(self):
+        columns = ['a', 'b', 'c']
+        random_data = np.random.rand(len(index), len(columns))
+        test_data_df = pa.DataFrame(index=index, columns=columns, data=random_data)
+        test_dn = mdf.datanode("test_data", test_data_df)
+
+        mask_df = pa.DataFrame(index=index, columns=columns, data=False)
+        mask_df.ix[datetime(2016, 9, 7), 'a'] = True
+        mask_df.ix[datetime(2016, 9, 8), 'b'] = True
+
+        mask_dn = mdf.datanode("mask", mask_df)
+
+        expected = test_data_df.copy()
+        expected.ix[datetime(2016, 9, 7), 'a'] = -1.0
+        expected.ix[datetime(2016, 9, 8), 'b'] = -1.0
+
+        actual = pa.DataFrame(self._run(test_dn.masknode(mask_dn, mask_value=-1.0)), index=index)
+        self.assertTrue((expected == actual).all().all())
+
+    def test_masked_df_mask_is_bool(self):
+        columns = ['a', 'b', 'c']
+        random_data = np.random.rand(len(index), len(columns))
+        test_data_df = pa.DataFrame(index=index, columns=columns, data=random_data)
+        test_dn = mdf.datanode("test_data", test_data_df)
+
+        mask_s = pa.Series(index=index, data=False)
+        mask_s[datetime(2016, 9, 7)] = True
+        mask_s[datetime(2016, 9, 9)] = True
+
+        mask_dn = mdf.datanode("mask", mask_s)
+
+        expected = test_data_df.copy()
+        expected.ix[datetime(2016, 9, 7), :] = -1.0
+        expected.ix[datetime(2016, 9, 9), :] = -1.0
+
+        actual = pa.DataFrame(self._run(test_dn.masknode(mask_dn, mask_value=-1.0)), index=index)
+        self.assertTrue((expected == actual).all().all())
 
     def _run(self, node):
         result = []
