@@ -22,7 +22,7 @@ class MDFLookAheadNode(MDFCustomNode):
     # because of changes to the current date.
     dirty_flags_propagate_mask = ~DIRTY_FLAGS.DATETIME
 
-    def on_set_date(self, ctx, date):
+    def on_set_date(self, ctx, date, flags):
         """called just before 'now' is changed"""
         # return True if date is going backwards to indicate we should be marked as dirty
         return ctx.get_date() > date

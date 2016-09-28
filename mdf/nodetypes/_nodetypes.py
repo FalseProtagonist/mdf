@@ -58,11 +58,27 @@ class MDFCustomNodeIterator(MDFIterator):
         self.func = custom_node._custom_iterator_func
         self.node_type_func = self.custom_node._custom_iterator_node_type_func
 
-        self.value_generator = None
         self.is_generator = _isgeneratorfunction(self.func)
+        self._value_generator = None
 
         self.node_type_is_generator = _isgeneratorfunction(self.node_type_func)
-        self.node_type_generator = None
+        self._node_type_generator = None
+        self._node_type_generator_called = False
+
+    def get_value_generator(self):
+        if self.is_generator and self._value_generator is None:
+            self._value_generator = self.func()
+        return self._value_generator
+
+    def get_node_type_generator(self):
+        value = self._get_input_value()
+        return self._get_node_type_generator(value)
+
+    def _get_node_type_generator(self, value):
+        if self.node_type_is_generator and self._node_type_generator is None:
+            kwargs = self.custom_node._get_kwargs()
+            self._node_type_generator = self.node_type_func(value, **kwargs)
+        return self._node_type_generator
 
     def __reduce__(self):
         return (
@@ -73,30 +89,31 @@ class MDFCustomNodeIterator(MDFIterator):
             None
         )
 
+    def _get_input_value(self):
+        if self.custom_node._call_with_no_value:
+            return
+
+        if self.custom_node._call_with_node:
+            return self.custom_node._value_node
+
+        if self.is_generator:
+            return next(self.get_value_generator())
+
+        return self.func()
+
     def __iter__(self):
         return self
 
     def next(self):
-        if self.custom_node._call_with_no_value:
-            value = None
-        elif self.custom_node._call_with_node:
-            value = self.custom_node._value_node
-        else:
-            if self.is_generator:
-                if not self.value_generator:
-                    self.value_generator = self.func()
-                value = next(self.value_generator)
-            else:
-                value = self.func()
-
+        value = self._get_input_value()
         if self.node_type_is_generator:
-            if not self.node_type_generator:
-                # create the new node type generator and return
-                kwargs = self.custom_node._get_kwargs()
-                self.node_type_generator = self.node_type_func(value, **kwargs)
-                return next(self.node_type_generator)
+            if not self._node_type_generator_called:
+                # advance the node type generator and return
+                result = next(self._get_node_type_generator(value))
+                self._node_type_generator_called = True
+                return result
 
-            return self.node_type_generator.send(value)
+            return self._node_type_generator.send(value)
 
         # node type is plain function
         kwargs = self.custom_node._get_kwargs()
@@ -104,11 +121,12 @@ class MDFCustomNodeIterator(MDFIterator):
 
 
 
-def _unpickle_custom_node_iterator(custom_node, value_generator, node_type_generator):
+def _unpickle_custom_node_iterator(custom_node, value_generator, node_type_generator, node_type_generator_called):
     self = cython.declare(MDFCustomNodeIterator)
     self = MDFCustomNodeIterator(custom_node)
-    self.value_generator = value_generator
-    self.node_type_generator = node_type_generator
+    self._value_generator = value_generator
+    self._node_type_generator = node_type_generator
+    self._node_type_generator_called = node_type_generator_called
     return self
 
 
@@ -117,8 +135,9 @@ def _pickle_custom_node_iterator(self_):
     self = self_
     return (
         self.custom_node,
-        self.value_generator,
-        self.node_type_generator,
+        self._value_generator,
+        self._node_type_generator,
+        self._node_type_generator_called
     )
 
 
@@ -196,22 +215,6 @@ class MDFCustomNode(MDFEvalNode):
             if value is not None:
                 assert isinstance(value, MDFNode), "Expected a node for '%s', got %s" % (arg, value)
 
-        # check the first argument and see if it needs a node rather than a value
-        self._call_with_node = args[0].endswith("_node")
-        if self._call_with_node:
-            # self._value_node is used as we don't want to set self._base_node is there's
-            # not actually a base node, as that would break serialization.
-            self._value_node = self._base_node
-
-            # if we need a value node but there's no base node create a new node
-            if self._value_node is None:
-                self._value_node = MDFEvalNode(self._cn_func,
-                                               name=(name or self._get_func_name(func)) + "_value_",
-                                               short_name=short_name + "_value_" if short_name else None,
-                                               fqname=fqname + "_value_" if fqname else None,
-                                               category=category,
-                                               filter=filter)
-
         eval_func = self._cn_eval_func
         if _isgeneratorfunction(node_type_func) or _isgeneratorfunction(func):
             eval_func = MDFCustomNodeIteratorFactory(self)
@@ -224,6 +227,10 @@ class MDFCustomNode(MDFEvalNode):
                              cls=cls,
                              category=category,
                              filter=filter)
+
+        # check the first argument and see if it needs a node rather than a value
+        self._call_with_node = args[0].endswith("_node")
+        self._setup_value_node()
 
         # set func_doc from the inner function's docstring
         self.func_doc = getattr(func, "func_doc", None)
@@ -390,33 +397,46 @@ class MDFCustomNode(MDFEvalNode):
         # set the func used by this class
         self._cn_func = func
 
-    def _bind(self, other_evalnode, owner):
-        other = cython.declare(MDFCustomNode)
-        other = other_evalnode
-        MDFEvalNode._bind(self, other, owner)
-        self._node_type_func = other._node_type_func
-        func = self._bind_function(other._cn_func, owner)
-        self._set_func(func)
+        if self._value_node:
+            self._value_node._set_func(self._cn_func)
 
-        # copy the kwargs
-        self._kwargs = dict(other._kwargs)
-        
-        # bind the eval nodes (won't do anything if they're already bound)
-        self._kwnodes = {}
-        for k, node in dict_iteritems(other._kwnodes):
-            if isinstance(node, MDFEvalNode) and _is_member_of(owner, node):
-                self._kwnodes[k] = node.__get__(None, owner)
-            else:
-                self._kwnodes[k] = node
+    def _setup_value_node(self):
+        self._value_node = None
+        if self._call_with_node:
+            # self._value_node is used as we don't want to set self._base_node is there's
+            # not actually a base node, as that would break serialization.
+            self._value_node = self._base_node
 
-        # bind the functions in case they're classmethods
-        self._kwfuncs = {}
-        for k, func in dict_iteritems(other._kwfuncs):
-            if _is_member_of(owner, func):
-                self._kwfuncs[k] = self._bind_function(func, owner)
+            # if we need a value node but there's no base node create a new node
+            if self._value_node is None:
+                self._value_node = MDFEvalNode(self._cn_func,
+                                               name=self.name + "_value_",
+                                               short_name=self.short_name + "_value_" if self.short_name else None,
+                                               fqname=self.name + "_value_",
+                                               category=self.categories,
+                                               filter=self.get_filter())
 
-        # set the docstring for the bound node to the same as the unbound one
-        self.func_doc = other.func_doc
+    def _get_bind_kwargs(self, owner):
+        kwargs = MDFEvalNode._get_bind_kwargs(self, owner)
+
+        # all args are in self._kwargs, including ones originally in nodetype_func_args
+        node_type_kwargs = {}
+        for key, value in self._kwargs.iteritems():
+            node_type_kwargs[key] = self._bind_function(value, owner)
+
+        func = self._bind_function(self._cn_func, owner)
+        filter = self._bind_function(self.get_filter(), owner)
+
+        kwargs.update({
+            "func": func,
+            "node_type_func": self._node_type_func,
+            "base_node": self._base_node,
+            "base_node_method_name": self._base_node_method_name,
+            "nodetype_func_args": tuple(),
+            "nodetype_func_kwargs": node_type_kwargs
+        })
+
+        return kwargs
 
     def _get_kwargs(self):
         kwargs = cython.declare(dict)

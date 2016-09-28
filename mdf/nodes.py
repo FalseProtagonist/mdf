@@ -55,8 +55,7 @@ def _get_calling_module_and_class():
     returns the first module on the call stack that's not this module
     If being called during class construction also returns the class name
     """
-    this_module = sys.modules[__name__]
-    this_package = this_module.__package__
+    ignored_packages = re.compile("^mdf(\.(?!tests)[^\.]+)*$")
     frame = sys._getframe() # frame = inspect.currentframe()
     try:
         while frame is not None:
@@ -77,7 +76,8 @@ def _get_calling_module_and_class():
                             if m_base == file_base:
                                 module = m
                                 break
-            if getattr(module, "__package__", None) != this_package:
+            package = getattr(module, "__package__", None)
+            if not package or not ignored_packages.match(package):
                 clsname = frame.f_code.co_name
                 if clsname == "<module>":
                     clsname = None
@@ -971,17 +971,17 @@ class MDFNode(MDFNodeBase):
                         _logger.debug("Retrieved values of %s[%s]" % (self.name, ctx))
                 return values
 
-            # otherwise call the subclass's _get_value and _get_all_values methods
-            value = self._get_value(ctx, node_state)
-            self._set_value(ctx, node_state, value)
-
+            # otherwise make sure any required generator is setup and get all values
+            self._setup_generator(ctx, node_state)
             values = self._get_all_values(ctx, node_state)
             self._set_all_values(ctx, node_state, values)
+
             if _trace_enabled:
                 if values is None:
                     _logger.debug("All values of %s[%s] are not available" % (self.name, ctx))
                 else:
                     _logger.debug("Retrieved values of %s[%s]" % (self.name, ctx))
+
             return values
         except:
             # Clear all dirty flags
@@ -1065,6 +1065,7 @@ class MDFNode(MDFNodeBase):
                 return value
 
             # otherwise call the subclass's _get_value method
+            self._setup_generator(ctx, node_state)
             value = self._get_value(ctx, node_state)
             self._set_value(ctx, node_state, value)
             return value
@@ -1109,6 +1110,15 @@ class MDFNode(MDFNodeBase):
         *override in subclass*
         """
         raise NotImplementedError("_get_value")
+
+    def _setup_generator(self, ctx, node_state):
+        """
+        If the node uses a generator make sure it's created
+        and set on the node state.
+
+        *override in subclass*
+        """
+        raise NotImplementedError("_setup_generator")
 
     def _get_cached_value_and_date(self, ctx, node_state):
         """
@@ -1428,6 +1438,9 @@ class MDFVarNode(MDFNode):
 
         return self._default_value
 
+    def _setup_generator(self, ctx, node_state):
+        return
+
     def _get_alt_context(self, ctx):
         """
         returns the context values for this node[ctx] actually
@@ -1546,6 +1559,9 @@ class MDFEvalNode(MDFNode):
         sets the function for this evalnode - only to be used by sub-classes
         that need to re-set the function after construction.
         """
+        if self._func is func:
+            return
+
         self._func = func
         self._is_generator = _isgeneratorfunction(self._func)
 
@@ -1554,28 +1570,44 @@ class MDFEvalNode(MDFNode):
         if self.func_doc is None:
             self.func_doc = getattr(func, "__doc__", None)
 
-    def _bind(self, other, owner):
+    def _get_bind_kwargs(self, owner):
+        filter_func = self._filter_func
+        if isinstance(filter_func, (types.FunctionType, MDFEvalNode)) \
+        and _is_member_of(self, filter_func):
+            if isinstance(filter_func, MDFEvalNode):
+                filter_func = filter_func.__get__(None, owner)
+            else:
+                filter_func = self._bind_function(filter_func, owner)
+
+        return {
+            "func": self._bind_function(self._func, owner),
+            "name": self.name.split(".")[-1],
+            "filter": filter_func,
+            "category": self.categories
+        }
+
+    def _bind(self, owner, base_cls):
         """
         bind is called when the node is 'got' for a class instance.
-        A new node is created, and this is called on the new node
-        with the original node and the owning class to which this
-        new node is to be bound.
+        This effectively clones 'self' and binds the copy to the owner.
         """
-        if isinstance(other._filter_func, (types.FunctionType, MDFEvalNode)) and _is_member_of(owner, other._filter_func):
-            if isinstance(other._filter_func, MDFEvalNode):
-                self._filter_func = other._filter_func.__get__(None, owner)
-            else:
-                self._filter_func = self._bind_function(other._filter_func, owner)
-        else:
-            self._filter_func = other._filter_func
+        # create the clone
+        kwargs = self._get_bind_kwargs(owner)
+        func = kwargs.pop("func")
+        clone = self.__class__(func, cls=(owner, base_cls), **kwargs)
 
         # set the docstring for the bound node to the same as the unbound one
-        self.func_doc = other.func_doc
+        self.func_doc = clone.func_doc
+
+        return clone
 
     def _bind_function(self, func, owner):
         """convenience method for binding a function to an owner"""
         if owner is None:
             return func
+
+        if isinstance(func, MDFEvalNode):
+            return func.__get__(None, owner)
 
         if isinstance(func, types.FunctionType):
             if func.__code__.co_argcount == 0:
@@ -1598,7 +1630,7 @@ class MDFEvalNode(MDFNode):
         if isinstance(func, types.TypeType) and issubclass(func, MDFIterator):
             return MDFIteratorFactory(func, owner)
 
-        raise Exception("MDFEvalNode._bind_function called with unexpected type %s" % type(func))
+        return func
 
     # MDFEvalNode is also a descriptor and can be bound to classes
     # to produce new nodes with the target function bound to the class
@@ -1622,12 +1654,8 @@ class MDFEvalNode(MDFNode):
                     base_cls = cls
                     break
 
-            # get the bound function
-            func = self._bind_function(self._func, owner)
-
             # create the new node and bind it to the owner
-            node = self.__class__(func, name=self.func_name, cls=(owner, base_cls), category=self.categories)
-            node._bind(self, owner)
+            node = self._bind(owner, base_cls)
 
             # cache it for next time
             self._bound_nodes[owner] = node
@@ -1651,6 +1679,18 @@ class MDFEvalNode(MDFNode):
     def has_timestep_update(self, ctx):
         """returns True if the node value can be updated incrementally as time is updated"""
         return self._is_generator
+
+    def _setup_generator(self, ctx, node_state):
+        # if a generator isn't needed or already exists return
+        if not (self._is_generator and node_state.generator is None):
+            return
+
+        # create the generator and set it on the node state
+        if _profiling_enabled:
+            with ctx._profile(self) as timer:
+                node_state.generator = self._func()
+        else:
+            node_state.generator = self._func()
 
     def _get_value(self, ctx, node_state):
         # if there's a timestep func and nothing's changed apart from the
@@ -1740,24 +1780,18 @@ class MDFEvalNode(MDFNode):
                 _logger.debug("Evaluating %s[%s] (%s)" % (self.name,
                                                           ctx,
                                                           DIRTY_FLAGS.to_string(dirty_flags)))
-
-            if _profiling_enabled:
-                with ctx._profile(self) as timer:
-                    value = self._func()
-            else:
-                value = self._func()
-
             if self._is_generator:
-                gen = value
-
-                # evaluate the generator
                 if _profiling_enabled:
                     with ctx._profile(self) as timer:
-                        value = next(gen)
+                        value = next(node_state.generator)
                 else:
-                    value = next(gen)
-
-                node_state.generator = iter(gen)
+                    value = next(node_state.generator)
+            else:
+                if _profiling_enabled:
+                    with ctx._profile(self) as timer:
+                        value = self._func()
+                else:
+                    value = self._func()
 
         return filtered_value if use_filtered_value else value
 

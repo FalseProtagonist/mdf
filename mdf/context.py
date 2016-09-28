@@ -722,6 +722,11 @@ class MDFContext(object):
         # trim any unused slots
         all_contexts = all_contexts[:num_contexts]
 
+        flags = cython.declare(int)
+        flags = DIRTY_FLAGS_TIME
+        if date.toordinal() != prev_date.toordinal():
+            flags |= DIRTY_FLAGS_DATE
+
         # call the 'on_set_date' callback on any nodes needing it before
         # actually setting the date on the context.
         # If on_set_date returns True that indicates the node will become dirty
@@ -742,7 +747,7 @@ class MDFContext(object):
                         cqueue_push(ctx._node_eval_stack, node)
                         try:
                             with ctx._profile(node) as timer:
-                                dirty = node.on_set_date(ctx, date)
+                                dirty = node.on_set_date(ctx, date, flags)
                             if dirty:
                                 on_set_date_dirty.append((node, ctx))
                                 on_set_date_dirty_count += 1
@@ -753,10 +758,6 @@ class MDFContext(object):
 
         # now all the on_set_date callbacks have been called update the date
         # for each context and mark any incrementally updated nodes as dirty.
-        flags = cython.declare(int)
-        flags = DIRTY_FLAGS_TIME
-        if date.toordinal() != prev_date.toordinal():
-            flags |= DIRTY_FLAGS_DATE
         for ctx in all_contexts:
             # set now on the context
             ctx._now = date

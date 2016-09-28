@@ -67,6 +67,7 @@ cdef class MDFNode(MDFNodeBase):
     cdef _touch(self, NodeState node_state, int flags=?, int _quiet=?, int _depth=?)
     cdef _get_cached_value_and_date(self, MDFContext ctx, NodeState node_state)
     cdef MDFContext _get_alt_context(self, MDFContext ctx)
+    cdef _setup_generator(self, MDFContext ctx, NodeState node_state)
     cdef _get_value(self, MDFContext ctx, NodeState node_state)
     cdef _set_value(self, MDFContext ctx, NodeState node_state, value, int _quiet=?)
     cdef _get_all_values(self, MDFContext ctx, NodeState node_state)
@@ -127,7 +128,8 @@ cdef class MDFEvalNode(MDFNode):
     cdef _fixup_alt_context(self, MDFContext ctx, NodeState node_state, MDFContext alt_ctx)
 
     # protected Python API
-    cpdef _bind(self, MDFEvalNode other, owner)
+    cpdef dict _get_bind_kwargs(self, owner)
+    cpdef MDFEvalNode _bind(self, owner, base_cls)
     cpdef _bind_function(self, func, owner)
     cpdef _get_func_name(self, func)
     cpdef _validate_func(self, func)

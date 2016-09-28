@@ -48,27 +48,30 @@ class MDFRowIteratorNode(MDFCustomNode):
         if ctx is None:
             ctx = _get_current_context()
 
-        # make sure the node has been evaluated before getting the node state
-        _unused = ctx[self]
-        alt_ctx = cython.declare(MDFContext)
-        alt_ctx = self._get_alt_context(ctx)
+        cookie = ctx._activate()
+        try:
+            # make sure the node has been evaluated before getting the node state
+            _unused = ctx[self]
+            alt_ctx = cython.declare(MDFContext)
+            alt_ctx = self._get_alt_context(ctx)
 
-        node_state = cython.declare(NodeState)
-        node_state = self._states[alt_ctx._id_obj]
+            node_state = cython.declare(NodeState)
+            node_state = self._states[alt_ctx._id_obj]
 
-        # get the row iterator from the node state
-        iterator = cython.declare(MDFCustomNodeIterator)
-        iterator = node_state.generator
+            # get the row iterator from the node state
+            iterator = cython.declare(MDFCustomNodeIterator)
+            iterator = node_state.generator
 
-        rowiter = cython.declare(_rowiternode)
-        rowiter = iterator.node_type_generator
+            rowiter = cython.declare(_rowiternode)
+            rowiter = iterator.get_node_type_generator()
 
-        # add the data to the iterator
-        rowiter._append(data, alt_ctx)
+            # add the data to the iterator
+            rowiter._append(data, alt_ctx)
 
-        # mark the node as dirty for future data
-        self.set_dirty(alt_ctx, DIRTY_FLAGS_FUTURE_DATA)
-
+            # mark the node as dirty for future data
+            self.set_dirty(alt_ctx, DIRTY_FLAGS_FUTURE_DATA)
+        finally:
+            ctx._deactivate(cookie)
 
     def _cn_get_all_values(self, ctx, node_state):
         # get the row iterator from the node state
@@ -76,7 +79,7 @@ class MDFRowIteratorNode(MDFCustomNode):
         iterator = node_state.generator
 
         rowiter = cython.declare(_rowiternode)
-        rowiter = iterator.node_type_generator
+        rowiter = iterator.get_node_type_generator()
 
         return rowiter._get_all_values(ctx)
 
