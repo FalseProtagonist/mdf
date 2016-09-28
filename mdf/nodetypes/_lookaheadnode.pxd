@@ -12,4 +12,5 @@ cpdef _lookaheadnode(value_unused,
                      periods=?,
                      MDFNode until=?,
                      MDFNode filter_node=?,
-                     offset=?)
+                     offset=?,
+                     strict_until=?)

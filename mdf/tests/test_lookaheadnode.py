@@ -57,6 +57,20 @@ class NodeTest(unittest.TestCase):
 
         self.assertEquals(actual.values.tolist(), list(expected))
 
+    def test_lookahead_node_conditional_nonstrict(self):
+        B_queue = B.queuenode()
+        B_lookahead = B.lookaheadnode(until=lookahead_until, strict_until=False)
+
+        self.ctx.set_date(self.daterange[0])
+        actual = self.ctx[B_lookahead]
+
+        self._run_for_daterange(self.daterange[:4], B_queue)
+        expected = self.ctx[B_queue]
+
+        self.assertEquals(actual.values.tolist(), list(expected))
+
+
+
     def _run_for_daterange(self, date_range, *nodes):
         for t in date_range:
             self.ctx.set_date(t)

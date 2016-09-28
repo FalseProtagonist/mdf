@@ -15,7 +15,7 @@ import cython
 
 
 class MDFLookAheadNode(MDFCustomNode):
-    nodetype_args = ["value_unused", "owner_node", "periods", "until", "filter_node", "offset"]
+    nodetype_args = ["value_unused", "owner_node", "periods", "until", "filter_node", "offset", "strict_until"]
     nodetype_node_kwargs = ["until"]
 
     # don't mark this node as dirty when dependent nodes are dirtied
@@ -28,7 +28,8 @@ class MDFLookAheadNode(MDFCustomNode):
         return ctx.get_date() > date
 
 
-def _lookaheadnode(value_unused, owner_node, periods=None, until=None, filter_node=None, offset=pa.datetools.BDay()):
+def _lookaheadnode(value_unused, owner_node, periods=None, until=None, filter_node=None, offset=pa.datetools.BDay(),
+                   strict_until=True):
     """
     Node type that creates an :py:class:`MDFNode` that returns
     a pandas Series of values of the underlying node for a sequence
@@ -59,8 +60,11 @@ def _lookaheadnode(value_unused, owner_node, periods=None, until=None, filter_no
     :param offset: date offset object (e.g. datetime timedelta or pandas date offset) to use to
                    increment the date for each sample point.
 
-    :param filter: optional node that if specified should evaluate to True if an observation is to
+    :param filter_node: optional node that if specified should evaluate to True if an observation is to
                    be included, or False otherwise.
+
+    :param strict_until: Optional. If True, then don't include the value that triggers the until node/function
+                         to become True, otherwise, include the value. Only used if until is not None.
 
     """
     assert owner_node.base_node is not None, \
@@ -88,6 +92,10 @@ def _lookaheadnode(value_unused, owner_node, periods=None, until=None, filter_no
             date += offset
 
             if until is not None and shifted_ctx.get_value(until):
+                if not strict_until:
+                    value = shifted_ctx.get_value(owner_node.base_node)
+                    values.append(value)
+                    dates.append(shifted_ctx.get_date())
                 break
 
             if filter_node is not None:
