@@ -26,6 +26,7 @@ cdef class MDFCustomNode(MDFEvalNode):
 
     # MDFNode overrides
     cdef _get_all_values(self, MDFContext ctx, NodeState node_state)
+    cpdef dict _get_bind_kwargs(self, owner)
 
     # protected python methods
     cpdef _cn_eval_func(self)
@@ -36,7 +37,14 @@ cdef class MDFCustomNodeIterator(MDFIterator):
     cdef MDFCustomNode custom_node
     cdef object func
     cdef object node_type_func
-    cdef object value_generator
+    cdef object _value_generator
     cdef int is_generator
     cdef int node_type_is_generator
-    cdef object node_type_generator
+    cdef object _node_type_generator
+    cdef bint _node_type_generator_called
+
+    cdef object _get_input_value(self)
+    cdef object _get_node_type_generator(self, value)
+
+    cdef object get_value_generator(self)
+    cdef object get_node_type_generator(self)

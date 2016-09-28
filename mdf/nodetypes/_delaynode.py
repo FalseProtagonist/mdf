@@ -1,7 +1,10 @@
-from ._nodetypes import MDFCustomNode, MDFCustomNodeIteratorFactory, nodetype
-from ..nodes import MDFIterator, _isgeneratorfunction
+from ._nodetypes import MDFCustomNode, MDFCustomNodeIteratorFactory, MDFCustomNodeIterator, nodetype
+from ._datanode import _rowiternode
+from ..nodes import MDFNode, MDFIterator, _isgeneratorfunction
 from ..context import MDFContext, _get_current_context
+from ..common import DIRTY_FLAGS
 from collections import deque, namedtuple
+import datetime as dt
 import numpy as np
 import pandas as pa
 import cython
@@ -68,6 +71,9 @@ class MDFDelayNode(MDFCustomNode):
                                nodetype_func_kwargs=nodetype_func_kwargs,
                                **kwargs)
 
+        # reset this so that if it's not a lazy node on_set_date doesn't get called
+        self._has_set_date_callback = self._dn_lazy
+
     @property
     def func(self):
         return self._dn_func
@@ -84,19 +90,10 @@ class MDFDelayNode(MDFCustomNode):
         self.clear_value(ctx)
         MDFCustomNode.clear(self, ctx)
 
-    def _bind(self, other_node, owner):
-        other = cython.declare(MDFDelayNode)
-        other = other_node
-        MDFCustomNode._bind(self, other, owner)
-        self._dn_func = self._bind_function(other._dn_func, owner)
-        self._dn_is_generator = other._dn_is_generator
-        self._dn_lazy = other._dn_lazy
-
-        func = self._dn_get_prev_value if self._dn_lazy else self._dn_func
-        self._set_func(func)
-
-        # set the docstring for the bound node to the same as the unbound one
-        self.func_doc = other.func_doc
+    def _get_bind_kwargs(self, owner):
+        kwargs = MDFCustomNode._get_bind_kwargs(self, owner)
+        kwargs["func"] = self._bind_function(self._dn_func, owner)
+        return kwargs
 
     def _dn_get_prev_value(self):
         # The value returned on date 'now' is the value for the previous day.
@@ -116,7 +113,17 @@ class MDFDelayNode(MDFCustomNode):
         kwargs = self._get_kwargs()
         return kwargs["initial_value"]
 
-    def on_set_date(self, ctx_, date):
+    def _cn_get_all_values(self, ctx, node_state):
+        # get the iterator from the node state
+        iterator = cython.declare(MDFCustomNodeIterator)
+        iterator = node_state.generator
+
+        delayiter = cython.declare(_delaynode)
+        delayiter = iterator.get_node_type_generator()
+
+        return delayiter._get_all_values(ctx)
+
+    def on_set_date(self, ctx_, date, flags):
         """called just before 'now' is advanced"""
         ctx = cython.declare(MDFContext)
         ctx = ctx_
@@ -173,6 +180,9 @@ class MDFDelayNode(MDFCustomNode):
             alt_ctx = self.get_alt_context(ctx)
             if alt_ctx is not ctx:
                 self.clear_value(alt_ctx)
+
+        if self._value_node is not None:
+            self._value_node.set_dirty(ctx, flags)
 
         # return True to indicate the value of this node will change after the date has
         # finished being changed.
@@ -233,13 +243,42 @@ class _delaynode(MDFIterator):
         def node():
             return some_value.delay(periods=5)
     """
-    _init_args_ = ["value", "filter_node_value", "periods", "initial_value", "lazy", "ffill"]
+    _init_args_ = ["value_node", "filter_node", "periods", "initial_value", "lazy", "ffill", "owner_node"]
 
-    def __init__(self, value, filter_node_value, periods=1,
-                 initial_value=None, lazy=False, ffill=False):
+    def __init__(self, value_node, filter_node, periods=1,
+                 initial_value=None, lazy=False, ffill=False, owner_node=None):
         self.lazy = lazy
         self.skip_nans = ffill
+        self.has_rowiter = False
+        self.rowiter = None
         max_queue_size = 0
+
+        # If we can get all values from the value node then use a rowiter node
+        ctx = cython.declare(MDFContext)
+        if not lazy:
+            ctx = _get_current_context()
+            all_values = ctx._get_all_values(value_node)
+            if all_values is not None:
+                # the data is indexed by 'now' so it can be shifted by periods
+                all_values = all_values.shift(periods)
+                if initial_value is not None:
+                    all_values.ix[:periods] = initial_value
+
+                # forward fill if necessary
+                if ffill:
+                    all_values = all_values.fillna(method="ffill")
+
+                # create the simple row iterator with no delay or forward filling
+                self.rowiter = _rowiternode(data=all_values,
+                                            owner_node=owner_node,
+                                            index_node_type=dt.datetime)
+                self.has_rowiter = True
+                return
+
+        value = value_node()
+        filter_node_value = True
+        if filter_node is not None:
+            filter_node_value = filter_node()
 
         # if the initial value is a scalar but the value is a vector
         # broadcast the initial value
@@ -269,12 +308,18 @@ class _delaynode(MDFIterator):
         # is lazy. If it's lazy the filtering is done by the on_set_date callback
         # since it needs to be filtered based on the previous filter value.
         if filter_node_value or lazy:
-            self.send(value)
+            self.send(value_node)
 
     def next(self):
+        if self.has_rowiter:
+            return self.rowiter.next()
         return self.queue[0]
 
-    def send(self, value):
+    def send(self, value_node):
+        if self.has_rowiter:
+            return self.rowiter.next()
+
+        value = value_node()
         skip = False
         if self.skip_nans:
             if isinstance(value, float):
@@ -286,6 +331,10 @@ class _delaynode(MDFIterator):
         if not skip:
             self.queue.append(value)
         return self.queue[0]
+
+    def _get_all_values(self, ctx):
+        if self.has_rowiter:
+            return self.rowiter._get_all_values(ctx)
 
 
 # decorators don't work on cythoned classes

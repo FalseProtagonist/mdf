@@ -80,6 +80,21 @@ class NodeTest(unittest.TestCase):
         df = self.ctx._get_all_values(node)
         self.assertEquals(df.tolist(), expected.tolist())
 
+    def test_datanode_all_data_delayed(self):
+        data = pd.Series(range(len(self.daterange)), self.daterange, dtype=float)
+        node = datanode("test_datanode_all_data_delayed", data, delay=1)
+
+        expected = data.shift(1)
+        expected[np.isnan(expected)] = -1
+
+        # run the context for the daterange without doing anything (so 'now' has a timeseries set on it)
+        run(ctx=self.ctx, date_range=self.daterange)
+
+        # cf should be the forward filled dataframe indexed by now
+        df = self.ctx._get_all_values(node)
+        df[np.isnan(df)] = -1
+
+        self.assertEquals(df.tolist(), expected.tolist())
 
     def test_datanode_append_series(self):
         data = pd.Series(range(len(self.daterange)), self.daterange, dtype=float)
