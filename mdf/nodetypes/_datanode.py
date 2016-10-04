@@ -174,15 +174,13 @@ class _rowiternode(MDFIterator):
         current_index = None
         current_value = None
         if self._is_dataframe:
-            iterator = iter(data.index)
+            iterator = data.iterrows()
             if advance:
-                current_index = next(iterator)
-                current_value = data.xs(current_index)
+                current_index, current_value = next(iterator)
         if self._is_widepanel:
             iterator = iter(data.major_axis)
             if advance:
-                current_index = next(iterator)
-                current_value = data.major_xs(current_index)
+                current_index, current_value = next(iterator)
         if self._is_series:
             iterator = iter(sorted(dict_iteritems(data)))
             if advance:
@@ -299,10 +297,8 @@ class _rowiternode(MDFIterator):
         while i > self._current_index:
             # advance to the next item in the series
             try:
-                # TODO: once we upgrade pandas use the iterrows method
                 self._prev_value = self._current_value
-                self._current_index = next(self._iter)
-                self._current_value = self._data.xs(self._current_index)
+                self._current_index, self._current_value = next(self._iter)
             except StopIteration:
                 # If another block of data has been appended switch to that
                 if self._advance_block():
@@ -333,10 +329,8 @@ class _rowiternode(MDFIterator):
         while i > self._current_index:
             # advance to the next item in the series
             try:
-                # TODO: once we upgrade pandas use the iterrows method
                 self._prev_value = self._current_value
-                self._current_index = next(self._iter)
-                self._current_value = self._data.major_xs(self._current_index)
+                self._current_index, self._current_value = next(self._iter)
             except StopIteration:
                 # If another block of data has been appended switch to that
                 if self._advance_block():
