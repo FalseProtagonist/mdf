@@ -13,7 +13,10 @@ from . import io
 from .cqueue import *
 import thread
 PyThread_get_thread_ident = thread.get_ident
+import_datetime = lambda: None
 # PURE PYTHON END
+
+import_datetime()
 
 DIRTY_FLAGS_NONE = cython.declare(int, DIRTY_FLAGS.NONE)
 DIRTY_FLAGS_ALL  = cython.declare(int, DIRTY_FLAGS.ALL)

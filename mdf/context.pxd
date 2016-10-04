@@ -1,6 +1,7 @@
 """
 Cython optimizations for context.py
 """
+from cpython.datetime cimport import_datetime, datetime
 from cqueue cimport *
 
 cdef extern from "Python.h":
@@ -94,7 +95,7 @@ cdef class MDFContext(object):
     cdef object _id_obj
 
     cdef int _finalized
-    cdef public object _now
+    cdef public datetime _now
 
     cdef MDFContext _parent
     cdef dict _all_child_contexts
@@ -128,7 +129,7 @@ cdef class MDFContext(object):
     cdef MDFContext _shift(MDFContext self, shift_set, int cache_context=?)
     cdef Cookie _activate(self, MDFContext prev_ctx=?, thread_id=?)
     cdef _deactivate(self, Cookie cookie)
-    cdef _set_date(self, date)
+    cdef _set_date(self, datetime date)
 
     # 
     # semi-public C methods used by MDFNode
@@ -161,8 +162,8 @@ cdef class MDFContext(object):
     cpdef dict get_shift_set(self)
     cpdef list get_shifted_contexts(self)
     cpdef iter_shifted_contexts(self)    
-    cpdef set_date(self, date)
-    cpdef get_date(self)
+    cpdef set_date(self, datetime date)
+    cpdef datetime get_date(self)
     cpdef shift(self, shift_set, cache_context=?)
     cpdef ppstats(self)
     cpdef clear(self)
