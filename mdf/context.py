@@ -10,7 +10,7 @@ from .common import DIRTY_FLAGS
 from . import io
 
 # PURE PYTHON START (cimported in context.pxd)
-from cqueue import *
+from .cqueue import *
 import thread
 PyThread_get_thread_ident = thread.get_ident
 # PURE PYTHON END
@@ -656,6 +656,10 @@ class MDFContext(object):
         # remember the date before it's changed
         prev_date = self._now
 
+        # if the time's been reset then everything needs to be reset
+        reset_all = cython.declare(cython.bint)
+        reset_all = date < prev_date
+
         # don't allow the date to be changed on a shifted context as it will
         # potentially update values in the context below
         if self._shift_set and _now_node not in self._shift_set:
@@ -724,8 +728,12 @@ class MDFContext(object):
 
         flags = cython.declare(int)
         flags = DIRTY_FLAGS_TIME
+
         if date.toordinal() != prev_date.toordinal():
             flags |= DIRTY_FLAGS_DATE
+
+        if reset_all:
+            flags |= DIRTY_FLAGS_ALL
 
         # call the 'on_set_date' callback on any nodes needing it before
         # actually setting the date on the context.
@@ -776,9 +784,11 @@ class MDFContext(object):
         # (anything dependent on now will be dependent on
         # it in this context so no need to touch it in the shifted contexts)
         alt_ctx = _now_node.get_alt_context(self)
+        if reset_all:
+            _now_node.set_dirty(alt_ctx, flags)
         alt_ctx.set_value(_now_node, date)
 
-        if date < prev_date:
+        if reset_all:
             # if setting the date to a date in the past clear any incrementally
             # updated nodes so they'll start from their initial values again
             for ctx in all_contexts:

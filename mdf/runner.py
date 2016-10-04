@@ -118,8 +118,8 @@ def run(date_range,
     # the date range by setting the current date on the context to the default.
     if reset:
         adj_datetime_min = datetime(1900, 1, 1)  # strftime() methods requires year >= 1900
-        unshifted_ctx._set_date_range(date_range)
         unshifted_ctx.set_date(adj_datetime_min if tzinfo is None else _localize(adj_datetime_min, tzinfo))
+        unshifted_ctx._set_date_range(date_range)
     else:
         unshifted_ctx._extend_date_range(date_range)
 

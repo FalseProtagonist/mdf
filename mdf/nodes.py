@@ -30,7 +30,6 @@ DIRTY_FLAGS_ERROR = DIRTY_FLAGS.ERROR
 DIRTY_FLAGS_INVALIDATE_GENERATOR = DIRTY_FLAGS.INVALIDATE_GENERATOR
 DIRTY_FLAGS_CHANGED_MASK = DIRTY_FLAGS.CHANGED_MASK
 DIRTY_FLAGS_FUTURE_DATA = DIRTY_FLAGS.FUTURE_DATA
-DIRTY_FLAGS_DATETIME_AND_FUTURE_DATA = DIRTY_FLAGS.DATETIME | DIRTY_FLAGS.FUTURE_DATA
 
 
 # MethodWrapperType is missing from types
@@ -2023,8 +2022,8 @@ class MDFTimeNode(MDFVarNode):
         return "now"
 
     def _touch(self, node_state, flags=DIRTY_FLAGS_ALL, _quiet=False, _depth=0):
-        # only set the TIME, DATE and FUTURE_DATA flags on dependent nodes
-        MDFVarNode._touch(self, node_state, flags & DIRTY_FLAGS_DATETIME_AND_FUTURE_DATA, _quiet, _depth)
+        # only set the DATETIME flags on dependent nodes
+        MDFVarNode._touch(self, node_state, flags & DIRTY_FLAGS_DATETIME, _quiet, _depth)
         # but clear all flags on this node
         node_state.dirty_flags &= ~flags
 

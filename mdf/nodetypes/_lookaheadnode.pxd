@@ -4,7 +4,7 @@ from ..nodes cimport MDFNode
 
 
 cdef class MDFLookAheadNode(MDFCustomNode):
-    cpdef on_set_date(self, MDFContext ctx, date, int flags)
+    pass
 
 
 cpdef _lookaheadnode(value_unused,
