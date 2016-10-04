@@ -441,6 +441,9 @@ class MDFNode(MDFNodeBase):
                     else:
                         self._name = "%s.%s" % (self._modulename, name)
 
+        # for quicker hashing
+        self._name = intern(self._name)
+
         # dict of NodeStates per context
         self._states = {}
         MDFContext.register_node(self)
@@ -505,31 +508,57 @@ class MDFNode(MDFNodeBase):
     def __neg__(self):
         return MDFNode._op("__neg__", self)
 
-    def __eq__(lhs, rhs):
-        return MDFNode._commutative_binop("__eq__", lhs, rhs)
+    def __hash__(self):
+        return hash(self._name)
 
-    def __ne__(lhs, rhs):
-        return MDFNode._commutative_binop("__ne__", lhs, rhs)
+    def __richcmp__(lhs, rhs, op):
+        if op == 0:  # lt
+            if isinstance(lhs, MDFNode):
+                return MDFNode._op("__lt__", lhs, rhs)
+            return rhs > lhs
 
-    def __gt__(lhs, rhs):
-        if isinstance(lhs, MDFNode):
-            return MDFNode._op("__gt__", lhs, rhs)
-        return rhs < lhs
+        if op == 1:  # le
+            if isinstance(lhs, MDFNode):
+                return MDFNode._op("__le__", lhs, rhs)
+            return rhs >= lhs
 
-    def __ge__(lhs, rhs):
-        if isinstance(lhs, MDFNode):
-            return MDFNode._op("__ge__", lhs, rhs)
-        return rhs <= lhs
+        if op == 2:  # eq
+            return lhs is rhs
 
+        if op == 3:  # ne
+            return lhs is not rhs
+
+        if op == 4:  # gt
+            if isinstance(lhs, MDFNode):
+                return MDFNode._op("__gt__", lhs, rhs)
+            return rhs < lhs
+
+        if op == 5:  # ge
+            if isinstance(lhs, MDFNode):
+                return MDFNode._op("__ge__", lhs, rhs)
+            return rhs <= lhs
+
+        raise NotImplemented("__richcmp__ called with op=%d" % op)
+
+# PURE PYTHON START
     def __lt__(lhs, rhs):
-        if isinstance(lhs, MDFNode):
-            return MDFNode._op("__lt__", lhs, rhs)
-        return rhs > lhs
+        return lhs.__richcmp__(rhs, 0)
 
     def __le__(lhs, rhs):
-        if isinstance(lhs, MDFNode):
-            return MDFNode._op("__le__", lhs, rhs)
-        return rhs >= lhs
+        return lhs.__richcmp__(rhs, 1)
+
+    def __eq__(lhs, rhs):
+        return lhs.__richcmp__(rhs, 2)
+
+    def __ne__(lhs, rhs):
+        return lhs.__richcmp__(rhs, 3)
+
+    def __gt__(lhs, rhs):
+        return lhs.__richcmp__(rhs, 4)
+
+    def __ge__(lhs, rhs):
+        return lhs.__richcmp__(rhs, 5)
+# PURE PYTHON END
 
     @staticmethod
     def _commutative_binop(op_name, lhs, rhs):
