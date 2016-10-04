@@ -77,31 +77,6 @@ def A_plus_B():
     return A() + B()
 
 
-class DelayNodeTest(object): 
-
-    @evalnode
-    def initial_value(cls):
-        return 0
-
-    @delaynode(periods=1, initial_value=initial_value)
-    def delayed_node(cls):
-        i = 1
-        while True:
-            yield i
-            i += 1
-
-    @delaynode(periods=1, initial_value=initial_value, lazy=True)
-    def delayed_node_lazy(cls):
-        return cls.delay_test()[-1]
-
-    @queuenode
-    def delay_test(cls):
-        return 1 + cls.delayed_node()
-
-    @queuenode
-    def delay_test_lazy(cls):
-        return 1 + cls.delayed_node_lazy()
-
 @queuenode
 def ffill_queue():
     return ffill_test()
@@ -169,13 +144,6 @@ class NodeTest(unittest.TestCase):
         self._run(cumprod_output)
         cumprod = self.ctx[cumprod_output]
         self.assertEqual(cumprod, 14201189062704000)
-
-    def test_delaynode(self):
-        self._run(DelayNodeTest.delay_test, DelayNodeTest.delay_test_lazy)
-        value =  self.ctx[DelayNodeTest.delay_test]
-        value_lazy =  self.ctx[DelayNodeTest.delay_test_lazy]
-        self.assertEqual(list(value), list(range(1, len(self.daterange)+1)))
-        self.assertEqual(list(value_lazy), list(range(1, len(self.daterange)+1)))
 
     def test_ffillnode(self):
         self._run(ffill_queue)
