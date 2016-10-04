@@ -2,7 +2,7 @@
 Convenience functions for creating a context and evaluating nodes
 for a range of dates and collecting the results.
 """
-from .context import MDFContext, _profiling_is_enabled
+from .context import MDFContext, profiling_is_enabled
 from .nodes import MDFNode
 from datetime import datetime
 import numpy as np
@@ -103,7 +103,7 @@ def run(date_range,
     callbacks_per_ctx = {}
     generators_per_ctx = {}
 
-    profiling_enabled = _profiling_is_enabled()
+    profiling_enabled = profiling_is_enabled()
 
     # Attempt to guess the tzinfo from the date range if one isn't specified explicitly
     if tzinfo is None:

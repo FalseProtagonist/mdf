@@ -23,6 +23,10 @@ ctypedef fused ShiftSetOrDict:
     dict
 
 
+cdef inline _profiling_is_enabled():
+    return _profiling_enabled
+
+
 cdef inline tuple _make_shift_key(ShiftSetOrDict shift_set)
 
 
@@ -49,9 +53,6 @@ cdef class NodeOrBuilderTimer(object):
 
     cpdef __enter__(self)
     cpdef __exit__(self, exc_type, exc_value, traceback)
-
-
-cpdef int _profiling_is_enabled()
 
 
 cdef class Cookie(object):

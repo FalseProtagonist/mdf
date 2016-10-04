@@ -36,13 +36,21 @@ _unpickle_context = None
 _pickle_shift_set = None
 _unpickle_shift_set = None
 
-_profiling_enabled = cython.declare(int, False)
+# PURE PYTHON START (inlined in context.pxd)
+_profiling_enabled = False
+
+def _profiling_is_enabled():
+    return _profiling_enabled
+# PURE PYTHON END
+
 def enable_profiling(enable=True):
     global _profiling_enabled
     _profiling_enabled = enable
 
-def _profiling_is_enabled():
+
+def profiling_is_enabled():
     return _profiling_enabled
+
 
 _allow_duplicate_nodes = cython.declare(int, False)
 def allow_duplicate_nodes(enable=True):
@@ -1272,6 +1280,36 @@ class MDFContext(object):
         print "Number of nodes: %s" % len(nodes_with_value)
         print "Number of shifted contexts: %s" % num_shifts
         print "Total Time: %f" % total_time
+
+    def get_node_stats(self, node):
+        """retrieve statistics for a single node"""
+        if not _profiling_enabled:
+            print ("*** MDF profiling not enabled ***\n" +
+                   "Use the --mdf-profile command line option " +
+                   "to enable profiling")
+            return
+
+        result = {
+            "num_contexts": 0,
+            "num_calls": 0,
+            "total_time": 0.0
+
+        }
+
+        ctx = cython.declare(MDFContext)
+        for ctx in itertools.chain([self], self.get_shifted_contexts()):
+            if not node.has_value(ctx):
+                continue
+
+            result["num_contexts"] += 1
+            timer = ctx._timers.get(node)
+            if timer is None:
+                continue
+
+            result["num_calls"] += timer.num_calls
+            result["total_time"] += timer.total_time
+
+        return result
 
     def to_dot(self,
                filename=None,

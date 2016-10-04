@@ -14,7 +14,7 @@ from context import MDFContext, MDFNodeBase
 from common import DIRTY_FLAGS
 
 # PURE PYTHON START (cimported in nodes.pxd)
-from context import _get_current_context, _get_context, _profiling_enabled
+from context import _get_current_context, _get_context, _profiling_is_enabled
 from cqueue import *
 # PURE PYTHON END
 
@@ -840,8 +840,10 @@ class MDFNode(MDFNodeBase):
         """name of the module this node was declared in"""
         return self._modulename
 
-    def has_timestep_update(self, ctx):
-        """returns True if the node value can be updated incrementally as time is updated"""
+    def has_timestep_update(self):
+        """Node should return True if it needs to be called on each timestep.
+        This is only called from the contstructor and the result is cached.
+        """
         return False
 
     def is_dirty(self, ctx, mask=DIRTY_FLAGS_ALL):
@@ -1027,7 +1029,13 @@ class MDFNode(MDFNodeBase):
 
             # otherwise make sure any required generator is setup and get all values
             self._setup_generator(ctx, node_state)
-            values = self._get_all_values(ctx, node_state)
+
+            if _profiling_is_enabled():
+                with ctx._profile(self) as timer:
+                    values = self._get_all_values(ctx, node_state)
+            else:
+                values = self._get_all_values(ctx, node_state)
+
             self._set_all_values(ctx, node_state, values)
 
             if _trace_enabled:
@@ -1426,20 +1434,20 @@ class MDFNode(MDFNodeBase):
 
     def __call__(self):
         """set up the context and return the value for this node"""
-        if _profiling_enabled:
+        if _profiling_is_enabled():
             stop_time = time.clock()
 
         ctx_ = cython.declare(MDFContext)
         ctx_ = _get_current_context()
 
-        if _profiling_enabled:
+        if _profiling_is_enabled():
             timer = ctx_._pause_current_timer(stop_time)
 
         try:
             # always get the value via the context so any new dependencies get set up
             return ctx_._get_node_value(self)
         finally:
-            if _profiling_enabled:
+            if _profiling_is_enabled():
                 timer.resume()
 
 @cython.cclass 
@@ -1582,8 +1590,8 @@ class MDFEvalNode(MDFNode):
         if name is None:
             name = self._get_func_name(func)
         MDFNode.__init__(self, name=name, short_name=short_name, fqname=fqname, cls=cls, category=category)
-        self._has_timestep_update = self._is_generator
-        
+        self._has_timestep_update = self.has_timestep_update()
+
         # get func_doc first then __doc__ to allow instances (iterators etc) to set their own docstring
         self.func_doc = getattr(func, "func_doc", None)
         if self.func_doc is None:
@@ -1618,6 +1626,7 @@ class MDFEvalNode(MDFNode):
 
         self._func = func
         self._is_generator = _isgeneratorfunction(self._func)
+        self._has_timestep_update = self.has_timestep_update()
 
         # update the docstring
         self.func_doc = getattr(func, "func_doc", None)
@@ -1730,8 +1739,10 @@ class MDFEvalNode(MDFNode):
     def get_filter(self):
         return self._filter_func
 
-    def has_timestep_update(self, ctx):
-        """returns True if the node value can be updated incrementally as time is updated"""
+    def has_timestep_update(self):
+        """Node should return True if it needs to be called on each timestep.
+        This is only called from the contstructor and the result is cached.
+        """
         return self._is_generator
 
     def _setup_generator(self, ctx, node_state):
@@ -1740,7 +1751,7 @@ class MDFEvalNode(MDFNode):
             return
 
         # create the generator and set it on the node state
-        if _profiling_enabled:
+        if _profiling_is_enabled():
             with ctx._profile(self) as timer:
                 node_state.generator = self._func()
         else:
@@ -1773,7 +1784,7 @@ class MDFEvalNode(MDFNode):
                 if date_cmp < 0: # prev_date < ctx._now
                     # if a filter's set check if the previous value can be re-used
                     if self._filter_func is not None:
-                        if _profiling_enabled:
+                        if _profiling_is_enabled():
                             with ctx._profile(self) as timer:
                                 needs_update = self._filter_func()
                         else:
@@ -1791,7 +1802,7 @@ class MDFEvalNode(MDFNode):
                     if _trace_enabled:
                         _logger.debug("Evaluating next value of %s[%s]" % (self.name, ctx))
 
-                    if _profiling_enabled:
+                    if _profiling_is_enabled():
                         with ctx._profile(self):
                             new_value = next(node_state.generator)
                     else:
@@ -1804,7 +1815,7 @@ class MDFEvalNode(MDFNode):
         use_filtered_value = cython.declare(cython.bint, False)
         filtered_value = cython.declare(object)
         if not self._is_generator and self._filter_func is not None:
-            if _profiling_enabled:
+            if _profiling_is_enabled():
                 with ctx._profile(self) as timer:
                     needs_update = self._filter_func()
             else:
@@ -1835,13 +1846,13 @@ class MDFEvalNode(MDFNode):
                                                           ctx,
                                                           DIRTY_FLAGS.to_string(dirty_flags)))
             if self._is_generator:
-                if _profiling_enabled:
+                if _profiling_is_enabled():
                     with ctx._profile(self) as timer:
                         value = next(node_state.generator)
                 else:
                     value = next(node_state.generator)
             else:
-                if _profiling_enabled:
+                if _profiling_is_enabled():
                     with ctx._profile(self) as timer:
                         value = self._func()
                 else:

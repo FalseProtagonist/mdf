@@ -1,5 +1,5 @@
 from context cimport MDFContext, MDFNodeBase
-from context cimport _get_current_context, _get_context, _profiling_enabled
+from context cimport _get_current_context, _get_context, _profiling_is_enabled
 from cqueue cimport *
 
 cdef int DIRTY_FLAGS_NONE

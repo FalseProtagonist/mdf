@@ -37,6 +37,10 @@ class MDFRowIteratorNode(MDFCustomNode):
     # always pass index_node as the node rather than evaluate it
     nodetype_node_kwargs = ["index_node", "filter_node"]
 
+    def has_timestep_update(self):
+        # no need to call on each timestep as the iterator will skip forwards if necessary
+        return False
+
 
     def append(self, data, ctx=None):
         """
