@@ -147,6 +147,7 @@ def _lazy_imports():
     _pickle_shift_set = ctx_pickle._pickle_shift_set
     _unpickle_shift_set = ctx_pickle._unpickle_shift_set
 
+
 class Timer(object):
     """object for collecting metrics about nodes and builders"""
     def __init__(self, node_or_builder):
@@ -173,17 +174,20 @@ class Timer(object):
         self.total_time += stop_time - self.started_time
         self.is_running = False
 
+
 class NodeOrBuilderTimer(object):
     """object with with semantics for timing a node or builder"""
-    def __init__(self, ctx, node_or_builder):
+    def __init__(self, ctx, node_or_builder, operation):
         self.ctx = ctx
         self.node_or_builder = node_or_builder
+        self.operation = operation
 
     def __enter__(self):
-        return self.ctx._start_timer(self.node_or_builder)
+        return self.ctx._start_timer(self.node_or_builder, self.operation)
 
     def __exit__(self, exc_type, exc_value, traceback):
         self.ctx._stop_timer()
+
 
 class NullTimer:
     """used in place of NodeOrBuilderTimer when profiling isn't enabled"""
@@ -192,6 +196,7 @@ class NullTimer:
 
     def __exit__(self, exc_type, exc_value, traceback):
         pass
+
 
 # use a single instance of the null timer to avoid cost of construction
 _null_timer = NullTimer()
@@ -765,7 +770,7 @@ class MDFContext(object):
                     for node in ctx._nodes_requiring_set_date_callback.keys():
                         cqueue_push(ctx._node_eval_stack, node)
                         try:
-                            with ctx._profile(node) as timer:
+                            with ctx._profile(node, "on_set_date") as timer:
                                 dirty = node.on_set_date(ctx, date, flags)
                             if dirty:
                                 on_set_date_dirty.append((node, ctx))
@@ -1102,16 +1107,16 @@ class MDFContext(object):
 
         return None
 
-    def _start_timer(self, node_or_builder):
+    def _start_timer(self, node_or_builder, operation):
         """starts the timer for a node and makes that timer the current one"""
         # there's one timer stack on the parent ctx, but each
         # ctx has its own set of timers.
         ctx = self._parent or self
         timer = cython.declare(Timer)
-        timer = self._timers.get(node_or_builder)
+        timer = self._timers.setdefault(node_or_builder, {}).get(operation)
         if timer is None:
             timer = Timer(node_or_builder)
-            self._timers[node_or_builder] = timer
+            self._timers[node_or_builder][operation] = timer
         ctx._timer_stack.append(timer)
         timer.start()
         return timer
@@ -1129,25 +1134,29 @@ class MDFContext(object):
         """stops the current timer and returns it, call timer.resume to resume"""
         stop_time = stop_time or time.clock()
         ctx = self._parent or self
+        if len(ctx._timer_stack) == 0:
+            return Timer(None)
+
         timer = cython.declare(Timer)
         timer = ctx._timer_stack[-1]
         if timer.is_running:
             timer.stop(stop_time)
+
         return timer
 
-    def _profile(self, node):
+    def _profile(self, node, operation):
         """
         returns an object using with semantics for timing a node evaluation.
         This is called from node sub-classes to indicate the node is doing work.
         """
         if _profiling_enabled:
-            return NodeOrBuilderTimer(self, node)
+            return NodeOrBuilderTimer(self, node, operation)
         return _null_timer
 
     def _profile_builder(self, builder):
         """used by mdf.run"""
         if _profiling_enabled:
-            return NodeOrBuilderTimer(self, builder)
+            return NodeOrBuilderTimer(self, builder, "building")
         return _null_timer
 
     def all_nodes(self):
@@ -1248,33 +1257,41 @@ class MDFContext(object):
                     nodes_with_value.add(node)
                     nodes_without_value.remove(node)
 
-            for obj, timer in ctx._timers.iteritems():
-                if isinstance(obj, MDFNodeBase):
-                    name = obj.name
-                elif hasattr(obj, "__name__"):
-                    name = "<%s 0x%x>" % (obj.__name__, id(obj))
-                elif hasattr(obj, "__class__"):
-                    name = "<%s 0x%x>" % (obj.__class__.__name__, id(obj))
-                else:
-                    name = str(obj)
+            for obj, ops_to_timers in ctx._timers.items():
+                for op, timer in ops_to_timers.items():
+                    if isinstance(obj, MDFNodeBase):
+                        name = obj.name
+                    elif hasattr(obj, "__name__"):
+                        name = "<%s 0x%x>" % (obj.__name__, id(obj))
+                    elif hasattr(obj, "__class__"):
+                        name = "<%s 0x%x>" % (obj.__class__.__name__, id(obj))
+                    else:
+                        name = str(obj)
 
-                all_timers.setdefault(name, []).append(timer)
+                    all_timers.setdefault(name, {}).setdefault(op, []).append(timer)
 
         def timers_total_time(x):
-            _, timers = x
-            return sum([t.total_time for t in timers])
+            name, ops_to_timers = x
+            total_time = 0.0
+            for op, timers in ops_to_timers.items():
+                total_time += sum([t.total_time for t in timers])
+            return total_time
 
         all_timers = all_timers.items()
         all_timers.sort(key=timers_total_time)
 
         total_time = 0.0
-        for name, timers in all_timers:
-            node_num_calls = sum([t.num_calls for t in timers])
-            node_total_time = sum([t.total_time for t in timers])
-            print name
-            print "    Num Calls: %d" % node_num_calls
-            print "    Total Time: %f" % node_total_time
-            print
+        for name, timers_per_operation in all_timers:
+            print(name)
+            node_total_time = 0.0
+            for operation, timers in sorted(timers_per_operation.items()):
+                op_num_calls = sum([t.num_calls for t in timers])
+                op_total_time = sum([t.total_time for t in timers])
+                print("    %s num calls: %d" % (operation, op_num_calls))
+                print("    %s time: %f" % (operation, op_total_time))
+                node_total_time += op_total_time
+            print("    Total Time: %f" % node_total_time)
+            print("")
             total_time += node_total_time
 
         print "Number of nodes: %s" % len(nodes_with_value)
@@ -1289,11 +1306,9 @@ class MDFContext(object):
                    "to enable profiling")
             return
 
-        result = {
+        results = {
             "num_contexts": 0,
-            "num_calls": 0,
             "total_time": 0.0
-
         }
 
         ctx = cython.declare(MDFContext)
@@ -1301,15 +1316,16 @@ class MDFContext(object):
             if not node.has_value(ctx):
                 continue
 
-            result["num_contexts"] += 1
-            timer = ctx._timers.get(node)
-            if timer is None:
-                continue
+            results["num_contexts"] += 1
+            for op, timer in ctx._timers.get(node, {}).items():
+                result = results.setdefault(op, {
+                    "num_calls": 0,
+                    "total_time": 0.0
+                })
+                result["num_calls"] += timer.num_calls
+                result["total_time"] += timer.total_time
 
-            result["num_calls"] += timer.num_calls
-            result["total_time"] += timer.total_time
-
-        return result
+        return results
 
     def to_dot(self,
                filename=None,

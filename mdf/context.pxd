@@ -50,6 +50,7 @@ cdef class Timer(object):
 cdef class NodeOrBuilderTimer(object):
     cdef MDFContext ctx
     cdef object node_or_builder
+    cdef object operation
 
     cpdef __enter__(self)
     cpdef __exit__(self, exc_type, exc_value, traceback)
@@ -124,7 +125,7 @@ cdef class MDFContext(object):
     #
     # internal C only methods
     #
-    cdef Timer _start_timer(self, object node)
+    cdef Timer _start_timer(self, node, operation)
     cdef Timer _stop_timer(self)
     cdef MDFNodeBase _get_calling_node(self, MDFContext prev_ctx=?)
     cdef MDFContext _shift(MDFContext self, shift_set, int cache_context=?)
@@ -138,7 +139,7 @@ cdef class MDFContext(object):
     cdef _get_node_value(self, MDFNodeBase node, MDFNodeBase calling_node=?, MDFContext prev_ctx=?, thread_id=?)
     cdef _get_node_all_values(self, MDFNodeBase node, MDFNodeBase calling_node=?, MDFContext prev_ctx=?, thread_id=?)
     cdef Timer _pause_current_timer(self, double stop_time)
-    cdef object _profile(self, node)
+    cdef object _profile(self, node, operation)
     cpdef object _profile_builder(self, builder)
 
     #

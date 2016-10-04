@@ -1031,7 +1031,7 @@ class MDFNode(MDFNodeBase):
             self._setup_generator(ctx, node_state)
 
             if _profiling_is_enabled():
-                with ctx._profile(self) as timer:
+                with ctx._profile(self, "get_all_values") as timer:
                     values = self._get_all_values(ctx, node_state)
             else:
                 values = self._get_all_values(ctx, node_state)
@@ -1752,7 +1752,7 @@ class MDFEvalNode(MDFNode):
 
         # create the generator and set it on the node state
         if _profiling_is_enabled():
-            with ctx._profile(self) as timer:
+            with ctx._profile(self, "setup_generator") as timer:
                 node_state.generator = self._func()
         else:
             node_state.generator = self._func()
@@ -1785,7 +1785,7 @@ class MDFEvalNode(MDFNode):
                     # if a filter's set check if the previous value can be re-used
                     if self._filter_func is not None:
                         if _profiling_is_enabled():
-                            with ctx._profile(self) as timer:
+                            with ctx._profile(self, "get_filter") as timer:
                                 needs_update = self._filter_func()
                         else:
                             needs_update = self._filter_func()
@@ -1803,7 +1803,7 @@ class MDFEvalNode(MDFNode):
                         _logger.debug("Evaluating next value of %s[%s]" % (self.name, ctx))
 
                     if _profiling_is_enabled():
-                        with ctx._profile(self):
+                        with ctx._profile(self, "next_value"):
                             new_value = next(node_state.generator)
                     else:
                         new_value = next(node_state.generator)
@@ -1816,7 +1816,7 @@ class MDFEvalNode(MDFNode):
         filtered_value = cython.declare(object)
         if not self._is_generator and self._filter_func is not None:
             if _profiling_is_enabled():
-                with ctx._profile(self) as timer:
+                with ctx._profile(self, "get_value") as timer:
                     needs_update = self._filter_func()
             else:
                 needs_update = self._filter_func()
@@ -1847,13 +1847,13 @@ class MDFEvalNode(MDFNode):
                                                           DIRTY_FLAGS.to_string(dirty_flags)))
             if self._is_generator:
                 if _profiling_is_enabled():
-                    with ctx._profile(self) as timer:
+                    with ctx._profile(self, "get_value") as timer:
                         value = next(node_state.generator)
                 else:
                     value = next(node_state.generator)
             else:
                 if _profiling_is_enabled():
-                    with ctx._profile(self) as timer:
+                    with ctx._profile(self, "get_value") as timer:
                         value = self._func()
                 else:
                     value = self._func()
