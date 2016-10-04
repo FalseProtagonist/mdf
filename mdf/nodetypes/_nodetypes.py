@@ -367,6 +367,21 @@ class MDFCustomNode(MDFEvalNode):
         """node this custom node was derived from if created via a method call."""
         return self._base_node
 
+    @property
+    def value_node(self):
+        """Return a node that evaluates to the value passed to the node type function.
+        Only returns a node if the node type function accepts a node rather than a value.
+        """
+        return self._value_node
+
+    @property
+    def node_type_kwargs(self):
+        """Dictionary of kwargs that get passed to the node type function.
+        This includes any un-evaluated nodes that would be evaluated before being passed
+        to the node type function.
+        """
+        return self._kwargs
+
     #
     # Properties for use with MDFCustomNodeIterator
     #
@@ -850,6 +865,7 @@ def nodetype(func=None, cls=MDFCustomNode, method=None, node_method=None):
         if node_method is None:
             node_method = method + "node"
 
+    if node_method is not None:
         getnode_func = MDFCustomNodeMethod(func, cls, method, call=False)
         MDFNode._additional_attrs_[node_method] = getnode_func
 

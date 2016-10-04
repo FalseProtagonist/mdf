@@ -12,12 +12,64 @@ def B():
 
 C = A + B  # C is a node whose result is A() + B()
 """
+from ._nodetypes import nodetype
+from ._applynode import MDFApplyNode, _applynode
 from ..nodes import MDFNode
 import operator
 import cython
 import sys
 
+# PURE PYTHON START
+from ._nodetypes import dict_iteritems
+# PURE PYTHON END
+
 __all__ = []
+
+
+class MDFBinOpNode(MDFApplyNode):
+    nodetype_args = ["value_node", "func", "args", "kwargs"]
+    nodetype_node_kwargs = ["value_node"]
+
+    def _cn_get_all_values(self, ctx, node_state):
+        # if the value node and all args/kwargs nodes have data then we can provide a full set of data.
+        value_node = self.value_node
+        if self.value_node is None:
+            return None
+
+        value_node_df = ctx._get_all_values(value_node)
+        if value_node_df is None:
+            return
+
+        node_type_kwargs = self.node_type_kwargs
+        func = node_type_kwargs["func"]
+        args = node_type_kwargs.get("args", ())
+        kwargs = node_type_kwargs.get("kwargs", {})
+
+        new_args = []
+        for arg in args:
+            if isinstance(arg, MDFNode):
+                arg = ctx._get_all_values(arg)
+                if arg is None:
+                    return
+            new_args.append(arg)
+
+        new_kwargs = {}
+        for key, value in dict_iteritems(kwargs):
+            if isinstance(value, MDFNode):
+                value = ctx._get_all_values(value)
+                if value is None:
+                    return
+            new_kwargs[key] = value
+
+        # we know that this nodetype is only constructed with binary operators,
+        # and so the same function can be used on the full dataframes as on the
+        # individual rows.
+        return func(value_node_df, *new_args, **new_kwargs)
+
+
+# decorators don't work on cythoned types
+binopnode = nodetype(cls=MDFBinOpNode, node_method="_binopnode")(_applynode)
+
 
 
 class Op(object):
@@ -37,7 +89,7 @@ class Op(object):
         args = ()
         if rhs is not None:
             args = (rhs,)
-        return self.lhs.applynode(func=self.op, args=args)
+        return self.lhs._binopnode(func=self.op, args=args)
 
 
 if sys.version_info[0] <= 2:

@@ -6,6 +6,7 @@ written using mdf.
 """
 from ._nodetypes import MDFCustomNode, nodetype
 from ..nodes import MDFNode
+import cython
 
 # PURE PYTHON START
 from ._nodetypes import dict_iteritems
@@ -13,10 +14,11 @@ from ._nodetypes import dict_iteritems
 
 
 class MDFApplyNode(MDFCustomNode):
-    nodetype_args = ["value", "func", "args", "kwargs"]
+    nodetype_args = ["value_node", "func", "args", "kwargs"]
+    nodetype_node_kwargs = ["value_node"]
 
 
-def _applynode(value, func, args=(), kwargs={}):
+def _applynode(value_node, func, args=(), kwargs={}):
     """
     Return a new mdf node that applies `func` to the value of the node
     that is passed in. Extra `args` and `kwargs` can be passed in as
@@ -41,6 +43,7 @@ def _applynode(value, func, args=(), kwargs={}):
             value = value()
         new_kwargs[key] = value
 
+    value = value_node()
     return func(value, *new_args, **new_kwargs)
 
 

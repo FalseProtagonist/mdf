@@ -76,13 +76,6 @@ def B():
 def A_plus_B():
     return A() + B()
 
-@evalnode
-def Counter():
-    accum = -2.0
-    while True:
-        if accum != 0.0:
-            yield accum
-        accum += 0.5
 
 class DelayNodeTest(object): 
 
@@ -205,25 +198,6 @@ class NodeTest(unittest.TestCase):
         expected = self.ctx[expected_node]
 
         self.assertEquals(actual, expected)
-
-    def test_binary_operators_with_constant(self):
-        self._test(Counter,            [-2.0, -1.5, -1.0, -0.5,  0.5,  1.0,  1.5])
-        self._test(Counter + 0.2,      [-1.8, -1.3, -0.8, -0.3,  0.7,  1.2,  1.7])
-        self._test(Counter - 0.2,      [-2.2, -1.7, -1.2, -0.7,  0.3,  0.8,  1.3])
-        self._test(Counter * 2.0,      [-4.0, -3.0, -2.0, -1.0,  1.0,  2.0,  3.0])
-        self._test(Counter / 0.5,      [-4.0, -3.0, -2.0, -1.0,  1.0,  2.0,  3.0])
-
-        self._test(0.2 + Counter,      [-1.8, -1.3, -0.8, -0.3,  0.7,  1.2,  1.7])
-        self._test(1.0 - Counter,      [ 3.0,  2.5,  2.0,  1.5,  0.5,  0.0, -0.5])
-        self._test(2.0 * Counter,      [-4.0, -3.0, -2.0, -1.0,  1.0,  2.0,  3.0])
-        self._test(12 / (Counter+.25), [-6.8571428571428568, -9.6000000000000014, -16.0,
-                                        -48.0, 16.0, 9.6000000000000014, 6.8571428571428568])
-
-    def test_binary_operators_with_node(self):
-        self._test(Counter + Counter,  [-4.0, -3.0, -2.0, -1.0,  1.0,  2.0,  3.0])
-        self._test(Counter - Counter,  [ 0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0])
-        self._test(Counter * Counter,  [ 4.0,  2.25, 1.0,  0.25, 0.25, 1.0,  2.25])
-        self._test(Counter / Counter,  [ 1.0,  1.0,  1.0,  1.0,  1.0,  1.0,  1.0])
         
     def _test(self, node, expected_values):
         values = node.queuenode()
