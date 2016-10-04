@@ -3,7 +3,7 @@ numpy
 pyzmq
 Pyro4==4.14
 decorator
-pandas
+pandas<=0.18.1
 pyparsing
 matplotlib
 xlwt
