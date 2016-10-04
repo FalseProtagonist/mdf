@@ -1,12 +1,26 @@
-from ._nodetypes import MDFCustomNode, nodetype
+from ._nodetypes import MDFCustomNode, MDFCustomNodeIterator, nodetype, apply_filter
+from ._datanode import _rowiternode
 from ..nodes import MDFIterator
+from ..context import _get_current_context
+import datetime as dt
 import numpy as np
 import pandas as pa
 import cython
 
 
 class MDFReturnsNode(MDFCustomNode):
-    pass
+    nodetype_args = ["value_node", "filter_node", "owner_node", "use_diff"]
+    nodetype_node_kwargs = ["value_node"]
+
+    def _cn_get_all_values(self, ctx, node_state):
+        # get the iterator from the node state
+        iterator = cython.declare(MDFCustomNodeIterator)
+        iterator = node_state.generator
+
+        returnsiter = cython.declare(_returnsnode)
+        returnsiter = iterator.get_node_type_generator()
+
+        return returnsiter._get_all_values(ctx)
 
 
 class _returnsnode(MDFIterator):
@@ -42,13 +56,31 @@ class _returnsnode(MDFIterator):
 
     If use_diff=True then the difference between the prices is computed instead of the rate of return.
     """
-    _init_args_ = ["value", "filter_node_value", "use_diff"]
+    _init_args_ = ["value_node", "use_diff"]
 
-    def __init__(self, value, filter_node_value, use_diff):
-        self.is_float = False
-        if isinstance(value, float):
+    def __init__(self, value_node, filter_node, owner_node, use_diff=False):
+        value = value_node()
+        self.is_float = isinstance(value, float)
+        self.use_diff = use_diff or False
+        self.has_rowiter = False
+
+        # check if we can get the dataframe for the value node
+        ctx = _get_current_context()
+        all_values = ctx._get_all_values(value_node)
+        if all_values is not None:
+            all_filter_values = None
+            if filter_node:
+                all_filter_values = ctx._get_all_values(filter_node)
+            if all_filter_values is not None or filter_node is None:
+                returns_df = self.__calculate_returns(all_values, all_filter_values, use_diff)
+                self.rowiter = _rowiternode(data=returns_df,
+                                            owner_node=owner_node,
+                                            index_node_type=dt.datetime)
+                self.has_rowiter = True
+                return
+
+        if self.is_float:
             # floating point returns
-            self.is_float = True
             self.prev_value_f = np.nan
             self.current_value_f = np.nan
             self.return_f = 0.0
@@ -68,18 +100,42 @@ class _returnsnode(MDFIterator):
                 self.current_value.fill(np.nan)
                 self.returns.fill(0.0)
 
-        self.use_diff = use_diff or False
+        filter_node_value = True
+        if filter_node is not None:
+            filter_node_value = filter_node()
 
         # update the current value
         if filter_node_value:
-            self.send(value)
+            self.send(value_node)
+
+    def __calculate_returns(self, df, filter_mask, use_diff):
+        """calculate returns for a dataframe"""
+        if filter_mask is not None:
+            df = apply_filter(df, filter_mask)
+
+        # forward fill so returns for missing time points are zero
+        df = df.fillna(method="ffill")
+
+        if self.use_diff:
+            returns = df - df.shift(1)
+        else:
+            returns = (df / df.shift(1)) -1.0
+
+        returns.fillna(value=0.0, inplace=True)
+        return returns
 
     def next(self):
+        if self.has_rowiter:
+            return self.rowiter.next()
         if self.is_float:
             return self.return_f
         return self.returns
 
-    def send(self, value):
+    def send(self, value_node):
+        if self.has_rowiter:
+            return self.rowiter.next()
+
+        value = value_node()
         if self.is_float:
             value_f = cython.declare(cython.double, value)
 
@@ -94,7 +150,7 @@ class _returnsnode(MDFIterator):
                 self.return_f = self.current_value_f - self.prev_value_f
             else:
                 self.return_f = (self.current_value_f / self.prev_value_f) - 1.0
-            if np.isnan(self.return_f):
+            if self.return_f != self.return_f:
                 self.return_f = 0.0
             return self.return_f
 
@@ -110,6 +166,10 @@ class _returnsnode(MDFIterator):
             self.returns = (self.current_value / self.prev_value) - 1.0
         self.returns[np.isnan(self.returns)] = 0.0
         return self.returns
+
+    def _get_all_values(self, ctx):
+        if self.has_rowiter:
+            return self.rowiter._get_all_values(ctx)
 
 
 # decorators don't work on cythoned types

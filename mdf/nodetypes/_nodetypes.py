@@ -20,11 +20,29 @@ import numpy as np
 _python_version = cython.declare(int, sys.version_info[0])
 
 
+__all__ = [
+    "nodetype",
+]
+
+
 @cython.cfunc
 def dict_iteritems(d):
     if _python_version > 2:
         return iter(d.items())
     return d.iteritems()
+
+
+def apply_filter(df, filter_mask):
+    """Applies a filter mask to a dataframe indexed by 'now'.
+    This is consistent with how values are filtered if being
+    processed iteratively.
+    """
+    filter_mask = filter_mask.astype(bool)
+    df = df.copy()
+    df[~filter_mask] = np.nan
+    mask = ~(filter_mask.shift(-1) & filter_mask)
+    df[~filter_mask] = df[mask].fillna(method="ffill")[~filter_mask]
+    return df
 
 
 class MDFCustomNodeIteratorFactory(MDFIteratorFactory):
@@ -507,10 +525,7 @@ class MDFCustomNode(MDFEvalNode):
 
         # apply the filter, if there is one
         if filter_values is not None:
-            filter_values = filter_values.astype(bool)
-            values[~filter_values] = np.nan
-            mask = ~(filter_values.shift(-1) & filter_values)
-            values[~filter_values] = values[mask].fillna(method="ffill")[~filter_values]
+            values = apply_filter(values, filter_values)
 
         return values
 
