@@ -92,9 +92,19 @@ class Op(object):
         return self.lhs._binopnode(func=self.op, args=args)
 
 
-if sys.version_info[0] <= 2:
-    for op in ("__add__", "__sub__", "__mul__", "__div__", "__neg__"):
-        MDFNode._additional_attrs_[op] = Op(getattr(operator, op))
-else:
-    for op in ("__add__", "__sub__", "__mul__", "__truediv__", "__neg__"):
-        MDFNode._additional_attrs_[op] = Op(getattr(operator, op))
+binops = [
+    "__add__",
+    "__sub__",
+    "__mul__",
+    "__truediv__" if sys.version_info[0] > 2 else "__div__",
+    "__neg__",
+    "__lt__",
+    "__le__",
+    "__gt__",
+    "__ge__",
+    "__eq__",
+    "__ne__"
+]
+
+for op in binops:
+    MDFNode._additional_attrs_[op] = Op(getattr(operator, op))

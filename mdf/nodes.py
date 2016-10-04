@@ -504,7 +504,33 @@ class MDFNode(MDFNodeBase):
     
     def __neg__(self):
         return MDFNode._op("__neg__", self)
-    
+
+    def __eq__(lhs, rhs):
+        return MDFNode._commutative_binop("__eq__", lhs, rhs)
+
+    def __ne__(lhs, rhs):
+        return MDFNode._commutative_binop("__ne__", lhs, rhs)
+
+    def __gt__(lhs, rhs):
+        if isinstance(lhs, MDFNode):
+            return MDFNode._op("__gt__", lhs, rhs)
+        return rhs < lhs
+
+    def __ge__(lhs, rhs):
+        if isinstance(lhs, MDFNode):
+            return MDFNode._op("__ge__", lhs, rhs)
+        return rhs <= lhs
+
+    def __lt__(lhs, rhs):
+        if isinstance(lhs, MDFNode):
+            return MDFNode._op("__lt__", lhs, rhs)
+        return rhs > lhs
+
+    def __le__(lhs, rhs):
+        if isinstance(lhs, MDFNode):
+            return MDFNode._op("__le__", lhs, rhs)
+        return rhs >= lhs
+
     @staticmethod
     def _commutative_binop(op_name, lhs, rhs):
         """
