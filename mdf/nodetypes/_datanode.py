@@ -41,7 +41,6 @@ class MDFRowIteratorNode(MDFCustomNode):
         # no need to call on each timestep as the iterator will skip forwards if necessary
         return False
 
-
     def append(self, data, ctx=None):
         """
         Appends new data to the dataframe/series.
@@ -156,8 +155,8 @@ class _rowiternode(MDFIterator):
         self._appended_data_index = -1
 
         # call the index node to make sure this node depends on it and remember the type
+        index_value = index_node()
         if index_node_type is None:
-            index_value = index_node()
             index_node_type = type(index_value)
         self._index_node_type = index_node_type
 
@@ -255,7 +254,7 @@ class _rowiternode(MDFIterator):
                               and self._index_node_type is datetime.datetime
 
     def send(self, data):
-        if data is not self._initial_data:# and (data != self._initial_data).any():
+        if data is not self._initial_data:
             # clear the previous data and any appended data and restart with
             # the new dataframe/series etc
             self._set_data(data, True)
