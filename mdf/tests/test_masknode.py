@@ -14,7 +14,7 @@ def value_node():
 
 Returns 'x' on weekdays and np.nan on weekends.
 """
-from mdf import MDFContext
+from mdf import MDFContext, varnode, run
 import mdf
 from datetime import datetime
 import unittest
@@ -52,6 +52,8 @@ dfnode = mdf.datanode("df", df)
 mask = pa.Series([x.isoweekday() in (1, 7) for x in index], index=index)
 masknode = mdf.datanode("mask", mask)
 
+minus_one = varnode(default=-1.0)
+
 
 class NodeFilterTest(unittest.TestCase):
 
@@ -68,8 +70,12 @@ class NodeFilterTest(unittest.TestCase):
         self.assertEqual(expected_mask, actual_mask)
 
         expected = [-1 if m else i for (i, m) in zip(data, mask)]
-        actual = self._run(datanode.masknode(masknode, mask_value=-1))
+        actual = self._run(datanode.masknode(masknode, mask_value=minus_one))
         self.assertEqual(expected, actual)
+
+        # test getting all values returns the same
+        actual = self.ctx._get_all_values(datanode.masknode(masknode, mask_value=minus_one))
+        self.assertEqual(expected, list(actual))
 
     def test_masked_df(self):
         expected_value = pa.DataFrame({"A": [i for i in range(len(index))]}, index=index)
@@ -82,6 +88,10 @@ class NodeFilterTest(unittest.TestCase):
 
         expected = pa.DataFrame([{"A": -1 if m else i} for (i, m) in zip(data, mask)], index=index)
         actual = pa.DataFrame(self._run(dfnode.masknode(masknode, mask_value=-1)), index=index)
+        self.assertTrue((expected == actual).all().bool())
+
+        # test getting all values returns the same
+        actual = self.ctx._get_all_values(dfnode.masknode(masknode, mask_value=-1))
         self.assertTrue((expected == actual).all().bool())
 
     def test_masked_df_mask_is_series(self):
@@ -123,8 +133,9 @@ class NodeFilterTest(unittest.TestCase):
         self.assertTrue((expected == actual).all().all())
 
     def _run(self, node):
-        result = []
-        for t in index:
-            self.ctx.set_date(t)
-            result.append(self.ctx[node])
-        return result
+        results = []
+        def callback(date, ctx):
+            results.append(ctx[node])
+        run(index, [callback], ctx=self.ctx)
+        return results
+

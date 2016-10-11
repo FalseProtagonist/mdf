@@ -19,7 +19,7 @@ expr = Forward()
 
 name = Word(alphanums + "_")
 integer = Word(nums)
-number = Word(nums) + Optional(".") + Optional(integer)
+number = Optional("-") + Word(nums) + Optional(".") + Optional(integer)
 date = Regex("\d{4}-\d{2}-\d{2}")
 num_processors = Regex("\|\|\s*\d+")
 
