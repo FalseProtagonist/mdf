@@ -1,12 +1,24 @@
-from ._nodetypes import MDFCustomNode, nodetype
+from ._nodetypes import MDFCustomNode, MDFCustomNodeIterator, nodetype
+from ._datanode import _rowiternode
 from ..nodes import MDFIterator
+from ..context import MDFContext, _get_current_context
+import datetime as dt
 import numpy as np
 import pandas as pa
 import cython
 
 
 class MDFForwardFillNode(MDFCustomNode):
-    pass
+
+    def _cn_get_all_values(self, ctx, node_state):
+        # get the iterator from the node state
+        iterator = cython.declare(MDFCustomNodeIterator)
+        iterator = node_state.generator
+
+        ffilliter = cython.declare(_ffillnode)
+        ffilliter = iterator.get_node_type_generator()
+
+        return ffilliter._get_all_values(ctx)
 
 
 class _ffillnode(MDFIterator):
@@ -35,10 +47,38 @@ class _ffillnode(MDFIterator):
         def node():
             return some_value.ffill()
     """
-    _init_args_ = ["value", "filter_node_value", "initial_value"]
+    _init_args_ = ["value_node", "filter_node", "owner_node", "initial_value"]
 
-    def __init__(self, value, filter_node_value, initial_value=None):
+    def __init__(self, value_node, filter_node, owner_node, initial_value=None):
         self.is_float = False
+
+        self.has_rowiter = False
+        self.rowiter = None
+
+        # If we can get all values from the value node then use a rowiter node
+        ctx = cython.declare(MDFContext)
+        ctx = _get_current_context()
+        all_values = ctx._get_all_values(value_node)
+        if all_values is not None:
+            # forward fill
+            all_values = all_values.fillna(method="ffill")
+            if initial_value is not None:
+                all_values = all_values.fillna(value=initial_value)
+
+            # create the simple row iterator with no delay or forward filling
+            # (filtering is done by MDFCustomNode)
+            self.rowiter = _rowiternode(data=all_values,
+                                        owner_node=owner_node,
+                                        index_node_type=dt.datetime)
+            self.has_rowiter = True
+            return
+
+        # Otherwise set up the iterator
+        value = value_node()
+        filter_node_value = True
+        if filter_node is not None:
+            filter_node_value = filter_node()
+
         if isinstance(value, float):
             #
             # floating point fill forward
@@ -75,25 +115,37 @@ class _ffillnode(MDFIterator):
 
         # update the current value
         if filter_node_value:
-            self.send(value)
+            self.send(value_node)
 
     def next(self):
+        if self.has_rowiter:
+            return self.rowiter.next()
+
         if self.is_float:
             return self.current_value_f
         return self.current_value.copy()
 
-    def send(self, value):
+    def send(self, value_node):
+        if self.has_rowiter:
+            return self.rowiter.next()
+
         if self.is_float:
             # update the current value if value is not Nan
-            value_f = cython.declare(cython.double, value)
+            value_f = cython.declare(cython.double)
+            value_f = value_node()
             if value_f == value_f:
-                self.current_value_f = value
+                self.current_value_f = value_f
             return self.current_value_f
 
         # update the current value with the non-nan values
+        value = value_node()
         mask = ~np.isnan(value)
         self.current_value[mask] = value[mask]
         return self.current_value.copy()
+
+    def _get_all_values(self, ctx):
+        if self.has_rowiter:
+            return self.rowiter._get_all_values(ctx)
 
 
 # decorators don't work on cythoned types

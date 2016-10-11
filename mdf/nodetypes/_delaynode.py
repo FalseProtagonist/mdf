@@ -269,6 +269,7 @@ class _delaynode(MDFIterator):
                     all_values = all_values.fillna(method="ffill")
 
                 # create the simple row iterator with no delay or forward filling
+                # (filtering is done by MDFCustomNode)
                 self.rowiter = _rowiternode(data=all_values,
                                             owner_node=owner_node,
                                             index_node_type=dt.datetime)
