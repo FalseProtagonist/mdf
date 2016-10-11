@@ -1,6 +1,7 @@
 from ._nodetypes cimport MDFCustomNode
 from ..nodes cimport MDFNode, NodeState
 from ..context cimport MDFContext
+cimport numpy as np
 
 
 cdef class MDFMaskNode(MDFCustomNode):

@@ -2,6 +2,7 @@ from ._nodetypes import MDFCustomNode, nodetype
 from ..nodes import MDFNode
 import numpy as np
 import pandas as pa
+import cython
 
 
 class MDFMaskNode(MDFCustomNode):
@@ -55,12 +56,32 @@ def _masknode(value_node, mask, mask_value=np.nan):
 
     Returns 'x' on weekdays and np.nan on weekends.
     """
+    np_mask = cython.declare(np.ndarray)
+    np_value = cython.declare(np.ndarray)
+    np_mask_index = cython.declare(np.ndarray)
+    np_value_index = cython.declare(np.ndarray)
+
     value = value_node()
     if isinstance(value, pa.Series):
         if isinstance(mask, pa.Series):
+            # if they share the same index use numpy to do the mask (faster than pandas)
+            np_mask_index = mask.index.values
+            np_value_index = value.index.values
+            if (np_mask_index == np_value_index).all():
+                np_mask = mask.values
+                np_values = value.values.copy()
+                np_values[np_mask] = mask_value
+                return pa.Series(np_values, index=mask.index)
+
+            # if the mask is fully un-set return the whole value
+            if not mask.any():
+                return value
+
+            # finally revert to using the pandas mask
             value_copy = value.copy()
             value_copy[mask] = mask_value
             return value_copy
+
         if mask:
             return pa.Series(mask_value, index=value.index)
 
