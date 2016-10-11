@@ -65,7 +65,6 @@ cdef class MDFNode(MDFNodeBase):
     cdef _depends_on(self, NodeState node_state, MDFNode other, other_ctx_id)
     cdef _set_dirty(self, NodeState node_state, int flags, int _depth)
     cdef _touch(self, NodeState node_state, int flags=?, int _quiet=?, int _depth=?)
-    cdef _get_cached_value_and_date(self, MDFContext ctx, NodeState node_state)
     cdef MDFContext _get_alt_context(self, MDFContext ctx)
     cdef _setup_generator(self, MDFContext ctx, NodeState node_state)
     cdef _get_value(self, MDFContext ctx, NodeState node_state)

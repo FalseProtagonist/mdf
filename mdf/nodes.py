@@ -1103,7 +1103,11 @@ class MDFNode(MDFNodeBase):
         if node_state.dirty_flags & DIRTY_FLAGS_CHANGED_MASK == DIRTY_FLAGS_NONE:
             if _trace_enabled:
                 _logger.debug("Have cached value for %s[%s]" % (self.name, ctx))
-            return self._get_cached_value_and_date(ctx, node_state)[0]
+
+            if not node_state.has_value:
+                raise KeyError("%s not found in %s" % (self.name, ctx))
+
+            return node_state.value
 
         # get the alt context this node should be evaluated in (i.e. the least shifted context
         # with all the shifts this node depends on).
@@ -1182,15 +1186,6 @@ class MDFNode(MDFNodeBase):
         *override in subclass*
         """
         raise NotImplementedError("_setup_generator")
-
-    def _get_cached_value_and_date(self, ctx, node_state):
-        """
-        returns the cached value and date for this node in a context
-        """
-        if not node_state.has_value:
-            raise KeyError("%s not found in %s" % (self.name, ctx))
-
-        return node_state.value, node_state.date
 
     def _get_cached_value(self, ctx):
         """
@@ -1493,11 +1488,11 @@ class MDFVarNode(MDFNode):
         return "varnode"
 
     def _get_value(self, ctx, node_state):
-        try:
-            return self._get_cached_value_and_date(ctx, node_state)[0]
-        except KeyError:
-            if self._default_value is self._no_default_value_:
-                raise
+        if node_state.has_value:
+            return node_state.value
+
+        if self._default_value is self._no_default_value_:
+            raise
 
         return self._default_value
 
@@ -1774,55 +1769,39 @@ class MDFEvalNode(MDFNode):
         dirty_flags = node_state.dirty_flags
         if self._is_generator \
         and (dirty_flags & ~DIRTY_FLAGS_INVALIDATE_GENERATOR) == dirty_flags \
-        and node_state.generator is not None: 
-            # if this node has been valued already for this context
-            # check the date and see if it can be updated from that
-            try:
-                # don't unpack as a tuple as the produces slighly more complicated cython code
-                tmp = self._get_cached_value_and_date(ctx, node_state)
-                prev_value = tmp[0]
-                prev_date = tmp[1]
-            except KeyError:
-                prev_value, prev_date = None, None
+        and node_state.generator is not None \
+        and node_state.has_value:
+            # if a filter's set check if the previous value can be re-used
+            if self._filter_func is not None:
+                if _profiling_is_enabled():
+                    with ctx._profile(self, "get_filter") as timer:
+                        needs_update = self._filter_func()
+                else:
+                    needs_update = self._filter_func()
 
-            if prev_date is not None:
-                date_cmp = cython.declare(int)
-                date_cmp = 0 if prev_date == ctx._now else (-1 if prev_date < ctx._now else 1)
-                if date_cmp == 0: # prev_date == ctx._now
-                    self._touch(node_state, DIRTY_FLAGS_ALL & ~DIRTY_FLAGS_FUTURE_DATA, True)
-                    return prev_value
-
-                if date_cmp < 0: # prev_date < ctx._now
-                    # if a filter's set check if the previous value can be re-used
-                    if self._filter_func is not None:
-                        if _profiling_is_enabled():
-                            with ctx._profile(self, "get_filter") as timer:
-                                needs_update = self._filter_func()
-                        else:
-                            needs_update = self._filter_func()
-
-                        if not needs_update:
-                            # re-use the previous value
-                            if _trace_enabled:
-                                _logger.debug("Re-using previous value of %s[%s]" % (self.name, ctx))
-
-                            self._touch(node_state, DIRTY_FLAGS_ALL, True)
-                            return prev_value
-
-                    # call the timestep function with or without the context
+                if not needs_update:
+                    # re-use the previous value
                     if _trace_enabled:
-                        _logger.debug("Evaluating next value of %s[%s]" % (self.name, ctx))
+                        _logger.debug("Re-using previous value of %s[%s]" % (self.name, ctx))
 
-                    if _profiling_is_enabled():
-                        with ctx._profile(self, "next_value"):
-                            new_value = next(node_state.generator)
-                    else:
-                        new_value = next(node_state.generator)
+                    self._touch(node_state, DIRTY_FLAGS_ALL, True)
+                    return node_state.value
 
-                    return new_value
+            # call the timestep function with or without the context
+            if _trace_enabled:
+                _logger.debug("Evaluating next value of %s[%s]" % (self.name, ctx))
+
+            if _profiling_is_enabled():
+                with ctx._profile(self, "next_value"):
+                    new_value = next(node_state.generator)
+            else:
+                new_value = next(node_state.generator)
+
+            return new_value
 
         # If a filter's set call it, and if the current value should be filtered return the previous value.
         prev_value_found = cython.declare(cython.bint, False)
+        prev_value = cython.declare(object, None)
         use_filtered_value = cython.declare(cython.bint, False)
         filtered_value = cython.declare(object)
         if not self._is_generator and self._filter_func is not None:
@@ -1835,11 +1814,9 @@ class MDFEvalNode(MDFNode):
             if not needs_update:
                 # if this node has been valued already for this context
                 # check the date and see if it can be updated from that
-                try:
-                    prev_value = self._get_cached_value_and_date(ctx, node_state)[0]
+                if node_state.has_value:
+                    prev_value = node_state.value
                     prev_value_found = True
-                except KeyError:
-                    prev_value = None
 
                 # re-use the previous value
                 if _trace_enabled:
