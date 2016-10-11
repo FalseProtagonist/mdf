@@ -8,8 +8,16 @@ from ._nodetypes import MDFCustomNode, nodetype
 # suitable for filtering data, ie. the filter kwarg to evalnode(filter=...)
 #
 class FilteredNode(MDFCustomNode):
-    nodetype_args = ["value"]
+    nodetype_args = ["value_node"]
 
+    def _cn_get_all_values(self, ctx, node_state):
+        # if the value node can get all values return those.
+        # Filtering is taken care of by MDFCustomNode._get_all_values.
+        value_node = self.value_node
+        if self.value_node is None:
+            return None
+
+        return ctx._get_all_values(value_node)
 
     def _cn_eval_func(self):
         # return the wrapper node value.
@@ -18,7 +26,7 @@ class FilteredNode(MDFCustomNode):
 
 
 # this never gets called because of the _cn_eval_func override above
-def _unused(value):
+def _unused(value_node):
     raise AssertionError("This function should never be called.")
 
 

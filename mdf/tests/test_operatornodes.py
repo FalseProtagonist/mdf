@@ -81,6 +81,10 @@ class OperatorNodeTest(unittest.TestCase):
         self._test(Counter > 0, [False, False, False, False, True, True, True])
         self._test(Counter <= -1.0, [True, True, True, False, False, False, False])
 
+    def test_bool_operators(self):
+        self._test((Counter == AbsCounter) | (Counter <= -2.0), [True, False, False, False, True, True, True])
+        self._test((Counter == AbsCounter) & (Counter > 1.0), [False, False, False, False, False, False, True])
+
     def test_get_all_data(self):
         self._run()
 

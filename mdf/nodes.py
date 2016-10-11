@@ -521,7 +521,13 @@ class MDFNode(MDFNodeBase):
         if isinstance(lhs, MDFNode):
             return MDFNode._commutative_binop("__truediv__", lhs, rhs)
         return (_one_node / rhs) * lhs
-    
+
+    def __or__(lhs, rhs):
+        return MDFNode._commutative_binop("__or__", lhs, rhs)
+
+    def __and__(lhs, rhs):
+        return MDFNode._commutative_binop("__and__", lhs, rhs)
+
     def __neg__(self):
         return MDFNode._op("__neg__", self)
 
