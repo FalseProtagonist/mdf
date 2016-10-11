@@ -1030,7 +1030,7 @@ class MDFNode(MDFNodeBase):
         try:
             # get the value from alt_ctx if its different from the current context
             if alt_ctx is not ctx:
-                return alt_ctx._get_node_value(self, self, ctx, thread_id)
+                return alt_ctx._get_node_all_values(self, self, ctx, thread_id)
 
             override = cython.declare(MDFNode)
             override = self._get_override(ctx, node_state)
