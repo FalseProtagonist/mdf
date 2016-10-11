@@ -1,11 +1,24 @@
-from ._nodetypes import MDFCustomNode, nodetype
+from ._nodetypes import MDFCustomNode, MDFCustomNodeIterator, nodetype
+from ._datanode import _rowiternode
 from ..nodes import MDFIterator
+from ..context import MDFContext, _get_current_context
+import datetime as dt
 import pandas as pa
 import numpy as np
+import cython
 
 
 class MDFNanSumNode(MDFCustomNode):
-    pass
+
+    def _cn_get_all_values(self, ctx, node_state):
+        # get the iterator from the node state
+        iterator = cython.declare(MDFCustomNodeIterator)
+        iterator = node_state.generator
+
+        nansumiter = cython.declare(_nansumnode)
+        nansumiter = iterator.get_node_type_generator()
+
+        return nansumiter._get_all_values(ctx)
 
 
 class _nansumnode(MDFIterator):
@@ -33,10 +46,36 @@ class _nansumnode(MDFIterator):
         def node():
             return some_value.nansum()
     """
-    _init_args_ = ["value", "filter_node_value"]
+    _init_args_ = ["value_node", "owner_node", "filter_node"]
 
-    def __init__(self, value, filter_node_value):
+    def __init__(self, value_node, owner_node, filter_node):
         self.is_float = False
+
+        self.has_rowiter = False
+        self.rowiter = None
+
+        # If we can get all values from the value node then use a rowiter node
+        ctx = cython.declare(MDFContext)
+        ctx = _get_current_context()
+        all_values = ctx._get_all_values(value_node)
+        if all_values is not None:
+            # calculate the cumulative sum, skipping nans
+            summed_values = all_values.cumsum(axis=0, skipna=True)
+
+            # create the simple row iterator with no delay or forward filling
+            # (filtering is done by MDFCustomNode)
+            self.rowiter = _rowiternode(data=summed_values,
+                                        owner_node=owner_node,
+                                        index_node_type=dt.datetime)
+            self.has_rowiter = True
+            return
+
+        # Otherwise setup the iterator
+        value = value_node()
+        filter_node_value = True
+        if filter_node is not None:
+            filter_node_value = filter_node()
+
         if isinstance(value, pa.Series):
             self.accum = pa.Series(np.nan, index=value.index, dtype=value.dtype)
         elif isinstance(value, np.ndarray):
@@ -47,7 +86,7 @@ class _nansumnode(MDFIterator):
             self.accum_f = np.nan
 
         if filter_node_value:
-            self.send(value)
+            self.send(value_node)
 
     def _send_vector(self, value):
         mask = ~np.isnan(value)
@@ -69,14 +108,25 @@ class _nansumnode(MDFIterator):
         return self.accum_f
 
     def next(self):
+        if self.has_rowiter:
+            return self.rowiter.next()
+
         if self.is_float:
             return self.accum_f
         return self.accum.copy()
 
-    def send(self, value):
+    def send(self, value_node):
+        if self.has_rowiter:
+            return self.rowiter.next()
+
+        value = value_node()
         if self.is_float:
             return self._send_float(value)
         return self._send_vector(value)
+
+    def _get_all_values(self, ctx):
+        if self.has_rowiter:
+            return self.rowiter._get_all_values(ctx)
 
 
 # decorators don't work on cythoned types
