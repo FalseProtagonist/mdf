@@ -27,6 +27,12 @@ def Counter():
             yield accum
         accum += 0.5
 
+
+@evalnode
+def AbsCounter():
+    return abs(Counter())
+
+
 daterange = pa.bdate_range(datetime(1970, 1, 1), datetime(1970, 1, 10))
 
 df_a = pa.DataFrame([{"A": i, "B": -i} for i in range(len(daterange))], index=daterange, dtype=float)
@@ -63,6 +69,17 @@ class OperatorNodeTest(unittest.TestCase):
         self._test(Counter - Counter, [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
         self._test(Counter * Counter, [4.0, 2.25, 1.0, 0.25, 0.25, 1.0, 2.25])
         self._test(Counter / Counter, [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0])
+
+    def test_cmp_operators(self):
+        self._test(Counter == Counter, [True, True, True, True, True, True, True])
+        self._test(Counter == AbsCounter, [False, False, False, False, True, True, True])
+        self._test(Counter != AbsCounter, [True, True, True, True, False, False, False])
+        self._test(AbsCounter > Counter, [True, True, True, True, False, False, False])
+        self._test(AbsCounter >= Counter, [True, True, True, True, True, True, True])
+        self._test(Counter == 1.0, [False, False, False, False, False, True, False])
+        self._test(Counter < 0, [True, True, True, True, False, False, False])
+        self._test(Counter > 0, [False, False, False, False, True, True, True])
+        self._test(Counter <= -1.0, [True, True, True, False, False, False, False])
 
     def test_get_all_data(self):
         self._run()

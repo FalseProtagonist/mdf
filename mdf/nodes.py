@@ -540,10 +540,10 @@ class MDFNode(MDFNodeBase):
             return rhs >= lhs
 
         if op == 2:  # eq
-            return lhs is rhs
+            return MDFNode._commutative_binop("__eq__", lhs, rhs)
 
         if op == 3:  # ne
-            return lhs is not rhs
+            return MDFNode._commutative_binop("__ne__", lhs, rhs)
 
         if op == 4:  # gt
             if isinstance(lhs, MDFNode):
@@ -1741,7 +1741,7 @@ class MDFEvalNode(MDFNode):
             for cls in owner.mro():
                 # this slightly cumbersome check is to avoid testing equality with any objects
                 # that don't return bools when compared (eg pandas Series and DataFrames)
-                if self in [x for x in cls.__dict__.values() if isinstance(x, self.__class__)]:
+                if id(self) in [id(x) for x in cls.__dict__.values() if isinstance(x, self.__class__)]:
                     base_cls = cls
                     break
 
