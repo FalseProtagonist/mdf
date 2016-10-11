@@ -11,6 +11,7 @@ cdef class MDFNanSumNode(MDFCustomNode):
 cdef class _nansumnode(MDFIterator):
     cdef object accum
     cdef double accum_f
+    cdef bint accum_initialized
     cdef int is_float
     cdef bint has_rowiter
     cdef _rowiternode rowiter

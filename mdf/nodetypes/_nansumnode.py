@@ -50,7 +50,7 @@ class _nansumnode(MDFIterator):
 
     def __init__(self, value_node, owner_node, filter_node):
         self.is_float = False
-
+        self.accum_initialized = False
         self.has_rowiter = False
         self.rowiter = None
 
@@ -91,13 +91,21 @@ class _nansumnode(MDFIterator):
     def _send_vector(self, value):
         mask = ~np.isnan(value)
 
-        # set an nans in the accumulator where the value is not
-        # NaN to zero
-        accum_mask = np.isnan(self.accum)
-        if accum_mask.any():
-            self.accum[accum_mask & mask] = 0.0
+        # set any nans in the accumulator where the value is not NaN to zero
+        if not self.accum_initialized:
+            accum_mask = np.isnan(self.accum)
+            if accum_mask.any():
+                self.accum[accum_mask & mask] = 0.0
+            else:
+                # if the accumulator has no nans then don't check again next time
+                self.accum_initialized = True
 
-        self.accum[mask] += value[mask]
+        # avoid doing a mask when not necessary - it's very slow
+        if mask.all():
+            self.accum += value
+        else:
+            self.accum[mask] += value[mask]
+
         return self.accum.copy()
 
     def _send_float(self, value):
