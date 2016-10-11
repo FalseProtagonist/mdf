@@ -12,6 +12,7 @@ MDF - Data Flow Programming Toolkit
 =======================================
 
 """
+import numpy as np
 
 version = '2.2.1'
 cython_profile = False
@@ -71,6 +72,7 @@ if __name__ == "__main__":
 
     extra_compile_args = []
     extra_link_args = []
+    np_include = np.get_include()
     if cdebug:
         extra_compile_args = ["/Zi"]
         extra_link_args = ["/DEBUG"]
@@ -88,7 +90,7 @@ if __name__ == "__main__":
             module = ".".join(basename.split(os.path.sep))
             src = basename + ".py"
             src = _preprocess(src, max_pxd_update_time)
-            ext_modules.append(Extension(module, [src]))
+            ext_modules.append(Extension(module, [src], include_dirs=[np_include]))
 
     for e in ext_modules:
         e.pyrex_directives = {"profile": cython_profile}

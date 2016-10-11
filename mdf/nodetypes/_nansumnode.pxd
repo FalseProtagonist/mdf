@@ -2,6 +2,7 @@ from ._nodetypes cimport MDFCustomNode, MDFCustomNodeIterator
 from ._datanode cimport _rowiternode
 from ..nodes cimport MDFIterator, NodeState
 from ..context cimport MDFContext, _get_current_context
+cimport numpy as np
 
 
 cdef class MDFNanSumNode(MDFCustomNode):

@@ -90,6 +90,7 @@ if __name__ == "__main__":
 
     index = pa.date_range(datetime(2001, 1, 1), periods=10000, freq="10min")
     values = pa.DataFrame({chr(x): np.random.random(len(index)) for x in range(10)}, index=index)
+    values[values > 0.95] = np.nan
 
     @mdf.evalnode
     def breaks_chaining():

@@ -100,10 +100,21 @@ class _nansumnode(MDFIterator):
                 # if the accumulator has no nans then don't check again next time
                 self.accum_initialized = True
 
+        np_mask = cython.declare(np.ndarray)
+        np_value = cython.declare(np.ndarray)
+        np_accum = cython.declare(np.ndarray)
+
         # avoid doing a mask when not necessary - it's very slow
         if mask.all():
             self.accum += value
+        elif (value.index == self.accum.index).all():
+            # use numpy to do the mask if the index is the same (as it is in many cases)
+            np_mask = mask.values
+            np_value = value.values
+            np_accum = self.accum.values
+            np_accum[np_mask] += np_value[np_mask]
         else:
+            # finally fallback to pandas masking
             self.accum[mask] += value[mask]
 
         return self.accum.copy()
