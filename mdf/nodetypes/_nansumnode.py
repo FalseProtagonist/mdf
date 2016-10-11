@@ -89,33 +89,37 @@ class _nansumnode(MDFIterator):
             self.send(value_node)
 
     def _send_vector(self, value):
-        mask = ~np.isnan(value)
-
         # set any nans in the accumulator where the value is not NaN to zero
         if not self.accum_initialized:
-            accum_mask = np.isnan(self.accum)
+            accum_mask = np.isnan(self.accum) & ~np.isnan(value)
             if accum_mask.any():
-                self.accum[accum_mask & mask] = 0.0
-            else:
-                # if the accumulator has no nans then don't check again next time
+                self.accum[accum_mask] = 0.0
+
+            # if the accumulator has no nans then don't check again next time
+            if not np.isnan(self.accum.values).any():
                 self.accum_initialized = True
 
         np_mask = cython.declare(np.ndarray)
         np_value = cython.declare(np.ndarray)
         np_accum = cython.declare(np.ndarray)
+        np_value_index = cython.declare(np.ndarray)
+        np_accum_index = cython.declare(np.ndarray)
 
-        # avoid doing a mask when not necessary - it's very slow
-        if mask.all():
-            self.accum += value
-        elif (value.index == self.accum.index).all():
-            # use numpy to do the mask if the index is the same (as it is in many cases)
-            np_mask = mask.values
+        np_value_index = value.index.values
+        np_accum_index = self.accum.index.values
+
+        # use numpy to do the mask if the index is the same (as it is in many cases)
+        if (np_value_index == np_accum_index).all():
             np_value = value.values
             np_accum = self.accum.values
+            np_mask = ~np.isnan(np_value)
             np_accum[np_mask] += np_value[np_mask]
         else:
-            # finally fallback to pandas masking
-            self.accum[mask] += value[mask]
+            mask = ~np.isnan(value)
+            if mask.all():
+                self.accum += value
+            else:
+                self.accum[mask] += value[mask]
 
         return self.accum.copy()
 
