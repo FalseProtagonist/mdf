@@ -81,6 +81,28 @@ class DateNodeTests(unittest.TestCase):
         expected = list(daterange.date)
         self.assertEqual(list(value), expected)
 
+    def test_now_delayed(self):
+        test_node = now.delaynode(periods=1, initial_value=datetime(1990, 1, 1))
+        self._run(test_node.queuenode())
+
+        value = self.ctx[test_node.queuenode()]
+        expected = [datetime(1990, 1, 1)] + list(daterange)[:-1]
+        self.assertEqual(list(value), expected)
+
+        value = self.ctx._get_node_all_values(test_node)
+        self.assertEqual(list(value), expected)
+
+    def test_now_date_delayed(self):
+        test_node = now.date.delaynode(periods=1, initial_value=datetime(1990, 1, 1))
+        self._run(test_node.queuenode())
+
+        value = self.ctx[test_node.queuenode()]
+        expected = [datetime(1990, 1, 1)] + list(daterange.date)[:-1]
+        self.assertEqual(list(value), expected)
+
+        value = self.ctx._get_node_all_values(test_node)
+        self.assertEqual(list(value), expected)
+
     def test_now_node_all_data(self):
         self._run()
         value = self.ctx._get_node_all_values(now)
