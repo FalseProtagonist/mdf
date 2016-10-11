@@ -33,7 +33,7 @@ with open("requirements.txt", "rb") as f:
         requirements.append(line.strip())
 
 
-def _preprocess(src_file):
+def _preprocess(src_file, max_pxd_update_time):
     """
     Preprocess the python source files before cythoning.
     This is to work around limitations of using cython.compiled
@@ -44,7 +44,8 @@ def _preprocess(src_file):
     dest_file, ext = os.path.splitext(src_file)
     dest_file += ".cython" + ext
 
-    if os.path.exists(dest_file) and os.stat(src_file).st_mtime < os.stat(dest_file).st_mtime:
+    src_mtime = max(os.stat(src_file).st_mtime, max_pxd_update_time)
+    if os.path.exists(dest_file) and src_mtime < os.stat(dest_file).st_mtime:
         return dest_file
 
     output_lines = []
@@ -74,13 +75,19 @@ if __name__ == "__main__":
         extra_compile_args = ["/Zi"]
         extra_link_args = ["/DEBUG"]
 
+    max_pxd_update_time = 0
+    for dirpath, dirnames, files in os.walk("mdf"):
+        for file in fnmatch.filter(files, "*.pxd"):
+            filename = os.path.join(dirpath, file)
+            max_pxd_update_time = max(max_pxd_update_time, os.stat(filename).st_mtime)
+
     ext_modules = []
     for dirpath, dirnames, files in os.walk("mdf"):
         for file in fnmatch.filter(files, "*.pxd"):
             basename = os.path.join(dirpath, os.path.splitext(file)[0])
             module = ".".join(basename.split(os.path.sep))
             src = basename + ".py"
-            src = _preprocess(src)
+            src = _preprocess(src, max_pxd_update_time)
             ext_modules.append(Extension(module, [src]))
 
     for e in ext_modules:
