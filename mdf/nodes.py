@@ -858,6 +858,26 @@ class MDFNode(MDFNodeBase):
         self._short_name = ".".join([x.split(":")[0] for x in name.split(".")])
         return self._short_name
 
+    @short_name.setter
+    def short_name(self, short_name):
+        self._short_name = short_name
+
+    def label(self, short_name):
+        """
+        Sets the name and short_name on the node and returns the node.
+        """
+        name = short_name
+        if self._modulename:
+            name = "%s.%s" % (self._modulename, name)
+
+        self._name = name
+        self._short_name = short_name
+
+        # re-register the node so it can be found by name (for example, when pickling)
+        MDFContext.register_node(self)
+
+        return self
+
     @property
     def modulename(self):
         """name of the module this node was declared in"""
