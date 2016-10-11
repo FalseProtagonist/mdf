@@ -802,7 +802,10 @@ class MDFContext(object):
         alt_ctx = _now_node.get_alt_context(self)
         if reset_all:
             _now_node.set_dirty(alt_ctx, flags)
+
         alt_ctx.set_value(_now_node, date)
+        if flags & DIRTY_FLAGS_DATE != DIRTY_FLAGS_NONE:
+            alt_ctx.set_value(_now_node.date, date.date())
 
         if reset_all:
             # if setting the date to a date in the past clear any incrementally

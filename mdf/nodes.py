@@ -12,12 +12,16 @@ import re
 from .parser import tokenize, get_assigned_node_name
 from .context import MDFContext, MDFNodeBase
 from .common import DIRTY_FLAGS
+import datetime as dt
 import pandas as pa
 
 # PURE PYTHON START (cimported in nodes.pxd)
 from context import _get_current_context, _get_context, _profiling_is_enabled
 from cqueue import *
+import_datetime = lambda: None
 # PURE PYTHON END
+
+import_datetime()
 
 _logger = logging.getLogger(__name__)
 _trace_enabled = cython.declare(int, False)
@@ -36,12 +40,14 @@ DIRTY_FLAGS_FUTURE_DATA = DIRTY_FLAGS.FUTURE_DATA
 # MethodWrapperType is missing from types
 MethodWrapperType = type([].__delattr__)
 
+
 def enable_trace(enable=True):
     global _trace_enabled
     _trace_enabled = enable
 
 _pickle_node = None
 _unpickle_node = None
+
 
 def _lazy_imports():
     global _pickle_node, _unpickle_node
@@ -98,6 +104,7 @@ if sys.version_info[0] > 2:
 else:
     TypeType = types.TypeType
 
+
 def _isgeneratorfunction(func):
     # see inpect.isgeneratorfunction
     # reproduced here to avoid breaking out of cython when
@@ -113,6 +120,7 @@ def _isgeneratorfunction(func):
     elif isinstance(func, MDFCallable):
         return func.is_generator()
     return False
+
 
 def _is_member_of(cls, obj):
     """
@@ -131,12 +139,14 @@ def _is_member_of(cls, obj):
 
     return False
 
+
 def _get_func_name(func):
     """returns a function's name"""
     try:
         return func.func_name
     except AttributeError:
         return func.__name__
+
 
 def _get_module_name(module):
     """returns a module's name"""
@@ -146,6 +156,7 @@ def _get_module_name(module):
     if module.__name__ == "__parents_main__":
         return "__main__"
     return module.__name__
+
 
 class NodeState(object):
     """
@@ -215,6 +226,7 @@ class NodeState(object):
             ),
         ]) + "\n</NodeState>"
 
+
 class MDFIterator(object):
     """
     MDFIterator is used as a way of writing path-dependent evalnodes.
@@ -262,6 +274,7 @@ class MDFIterator(object):
     def next(self):
         raise NotImplementedError("next")
 
+
 class MDFIteratorFactory(object):
     """
     Callable object that returns an instance of MDFIterator.
@@ -280,6 +293,7 @@ class MDFIteratorFactory(object):
 
     def __call__(self):
         return self.iterator_class(self.node_class)
+
 
 class MDFCallable(object):
     """
@@ -318,6 +332,7 @@ class MDFCallable(object):
 
     def is_generator(self):
         return _isgeneratorfunction(self.callable)
+
 
 class ConditionalDependencyError(Exception):
     
@@ -368,6 +383,7 @@ class ConditionalDependencyError(Exception):
                         "\n".join(["  %s" % x.name for x in diff_nodes])) +
                     ("\n\nMake that dependency unconditional to fix.") +
                     ("\n\n%s" % dep_tree)))
+
 
 class MDFNode(MDFNodeBase):
     """
@@ -1446,6 +1462,7 @@ class MDFNode(MDFNodeBase):
             if _profiling_is_enabled():
                 timer.resume()
 
+
 @cython.cclass 
 class NodeSetDirtyState(object):
     """internal class used by MDFNode._set_dirty"""
@@ -1453,6 +1470,7 @@ class NodeSetDirtyState(object):
     node_state = cython.declare(NodeState)
     node = cython.declare(MDFNode)
     flags = cython.declare(int)
+
 
 # cfunc to create NodeSetDirtyState to avoid having to convert the args
 # into a python tuple as would happen if using __init__
@@ -1467,6 +1485,7 @@ def create_NodeSetDirtyState(depth, node_state, node, flags):
     obj.node = node
     obj.flags = flags
     return obj
+
 
 class MDFVarNode(MDFNode):
     """most basic type of node that just holds a value"""
@@ -1545,6 +1564,7 @@ def varnode(name=None, default=MDFVarNode._no_default_value_, category=None):
         name = get_assigned_node_name("varnode", 0 if cython.compiled else 1)
     return MDFVarNode(name, default, category=category)
 
+
 class _VarGroupMeta(type):
     """
     Metaclass for constructing vargroups. At the moment, the main purpose
@@ -1561,6 +1581,7 @@ class _VarGroupMeta(type):
 
     def __repr__(self):
         return "<%s, %s>" % (self._group_name or "vargroup", self._dict)
+
 
 def vargroup(group_name=None, **kwargs):
     """
@@ -1583,6 +1604,7 @@ def vargroup(group_name=None, **kwargs):
     attribs = dict([(k, varnode(k, default=v, category=group_name)) for k, v in kwargs.iteritems()])
     cls_name = "%s__%s" % (group_name, str(uuid.uuid4()))
     return _VarGroupMeta(cls_name, bases=(object,), dict=attribs, group_name=group_name)
+
 
 class MDFEvalNode(MDFNode):
 
@@ -1983,7 +2005,7 @@ class MDFEvalNode(MDFNode):
 
             # add an explicit dependnecy on now if incrementally updated
             if self._has_timestep_update:
-                now_ = cython.declare(MDFTimeNode)
+                now_ = cython.declare(MDFDateTimeNode)
                 now_ = now
                 self.add_dependency(ctx, now_, now_.get_alt_context(ctx))
 
@@ -2006,6 +2028,7 @@ class MDFEvalNode(MDFNode):
 
         # set the value
         MDFNode.set_value(self, ctx, value)
+
 
 # for using decorator syntax to delclare eval nodes
 def evalnode(func=None, filter=None, category=None):
@@ -2063,17 +2086,24 @@ def evalnode(func=None, filter=None, category=None):
         return MDFEvalNode(func, category=category, filter=filter)
     return lambda x: evalnode(x, filter, category)
 
-class MDFTimeNode(MDFVarNode):
+
+class MDFDateTimeNode(MDFVarNode):
 
     def __init__(self, name=None, cls=None, fqname=None, modulename=None):
         MDFVarNode.__init__(self, name, cls=cls, fqname=fqname)
         if modulename is not None:
             self._modulename = modulename
+        self.date_node = MDFDateNode(self, cls=cls)
 
     @property
     def node_type(self):
         """returns the name of the node type of this node"""
         return "now"
+
+    @property
+    def date(self):
+        """returns a node that evaluates to the date part of this node"""
+        return self.date_node
 
     def _get_all_values(self, ctx, node_state):
         # The cached value is set in the context during 'run'.
@@ -2084,6 +2114,7 @@ class MDFTimeNode(MDFVarNode):
     def _touch(self, node_state, flags=DIRTY_FLAGS_ALL, _quiet=False, _depth=0):
         # only set the DATETIME flags on dependent nodes
         MDFVarNode._touch(self, node_state, flags & DIRTY_FLAGS_DATETIME, _quiet, _depth)
+
         # but clear all flags on this node
         node_state.dirty_flags &= ~flags
 
@@ -2094,8 +2125,43 @@ class MDFTimeNode(MDFVarNode):
 
         return MDFVarNode.set_value(self, ctx, value)
 
+
+class MDFDateNode(MDFVarNode):
+
+    # Don't mark this node as dirty when 'now' updates.
+    # Instead the date is advanced explicitly in MDFContext._set_date.
+    dirty_flags_propagate_mask = ~DIRTY_FLAGS.DATETIME
+
+    def __init__(self, owner, cls=None):
+        self.owner = owner
+        fqname = self.owner.name + "(date)"
+        MDFVarNode.__init__(self, fqname, cls=cls, fqname=fqname)
+        self._modulename = self.owner._modulename
+
+    @property
+    def node_type(self):
+        """returns the name of the node type of this node"""
+        return "now(date)"
+
+    def _get_value(self, ctx, node_state):
+        return ctx._get_node_value(self.owner, self).date()
+
+    def _get_all_values(self, ctx, node_state):
+        """return just the date parts of the current datetimes"""
+        datetimes = ctx._get_node_all_values(self.owner)
+        if datetimes is not None:
+            return pa.Series(datetimes.index.date, index=datetimes.index)
+
+    def _touch(self, node_state, flags=DIRTY_FLAGS_ALL, _quiet=False, _depth=0):
+        # only set the DATE flags on dependent nodes
+        MDFVarNode._touch(self, node_state, flags & DIRTY_FLAGS_DATE, _quiet, _depth)
+
+        # but clear all flags on this node
+        node_state.dirty_flags &= ~flags
+
+
 # there's one global 'now' node that gets the value of 'now' for each context
-_now_node = MDFTimeNode(fqname="now", modulename="mdf")
+_now_node = MDFDateTimeNode(fqname="now", modulename="mdf")
 now = _now_node
 
 # Used to implement the reversed division binary operator

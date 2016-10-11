@@ -1,3 +1,4 @@
+from cpython.datetime cimport import_datetime, datetime
 from context cimport MDFContext, MDFNodeBase
 from context cimport _get_current_context, _get_context, _profiling_is_enabled
 from cqueue cimport *
@@ -141,7 +142,9 @@ cdef class MDFEvalNode(MDFNode):
     cpdef set_value(self, MDFContext ctx, value)
 
 
-cdef class MDFTimeNode(MDFVarNode):
+cdef class MDFDateTimeNode(MDFVarNode):
+    cdef MDFVarNode date_node
+
     # C API
     cdef MDFContext _get_alt_context(self, MDFContext ctx)
     cdef _touch(self, NodeState node_state, int flags=?, int _quiet=?, int _depth=?)
@@ -149,3 +152,12 @@ cdef class MDFTimeNode(MDFVarNode):
 
     # public Python API
     cpdef set_value(self, MDFContext ctx, value)
+
+
+cdef class MDFDateNode(MDFVarNode):
+    cdef MDFDateTimeNode owner
+
+    # C API
+    cdef MDFContext _get_alt_context(self, MDFContext ctx)
+    cdef _touch(self, NodeState node_state, int flags=?, int _quiet=?, int _depth=?)
+    cdef _get_all_values(self, MDFContext ctx, NodeState node_state)
