@@ -2,6 +2,7 @@ from mdf import (
     MDFContext,
     evalnode,
     datanode,
+    varnode,
     run
 )
 
@@ -33,6 +34,9 @@ df_b = pa.DataFrame([{"A": -i, "B": i} for i in range(len(daterange))], index=da
 
 df_node_a = datanode("df_a", df_a)
 df_node_b = datanode("df_b", df_b)
+
+varnode_a = varnode(default=1.0)
+varnode_b = varnode(default=2.0)
 
 
 class OperatorNodeTest(unittest.TestCase):
@@ -76,6 +80,25 @@ class OperatorNodeTest(unittest.TestCase):
         # chained
         actual = self.ctx._get_all_values(df_node_a * df_node_a * 10)
         expected = pa.DataFrame([{"A": i*i*10, "B": i*i*10} for i in range(len(self.daterange))], index=self.daterange)
+        self.assertTrue((actual == expected).all().all())
+
+    def test_get_all_data_with_varnode(self):
+        self.ctx[varnode_a] = 1.0
+        self.ctx[varnode_b] = 2.0
+        self._run()
+
+        # binop on a datanode and a varnode
+        actual = self.ctx._get_all_values(df_node_a + varnode_a)
+        expected = df_a + 1.0
+        self.assertTrue((actual == expected).all().all())
+
+        actual = self.ctx._get_all_values(df_node_a * varnode_b)
+        expected = expected = df_a * 2.0
+        self.assertTrue((actual == expected).all().all())
+
+        # chained
+        actual = self.ctx._get_all_values((df_node_a * df_node_a) * (varnode_a + varnode_b))
+        expected = df_a * df_a * 3.0
         self.assertTrue((actual == expected).all().all())
 
     def _test(self, node, expected_values):

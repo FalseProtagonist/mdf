@@ -27,7 +27,7 @@ __all__ = []
 
 
 class MDFBinOpNode(MDFApplyNode):
-    nodetype_args = ["value_node", "func", "args", "kwargs"]
+    nodetype_args = ["value_node", "func", "func_name", "args", "kwargs"]
     nodetype_node_kwargs = ["value_node"]
 
     def _cn_get_all_values(self, ctx, node_state):
@@ -42,6 +42,7 @@ class MDFBinOpNode(MDFApplyNode):
 
         node_type_kwargs = self.node_type_kwargs
         func = node_type_kwargs["func"]
+        func_name = node_type_kwargs.get("func_name", None)
         args = node_type_kwargs.get("args", ())
         kwargs = node_type_kwargs.get("kwargs", {})
 
@@ -64,6 +65,11 @@ class MDFBinOpNode(MDFApplyNode):
         # we know that this nodetype is only constructed with binary operators,
         # and so the same function can be used on the full dataframes as on the
         # individual rows.
+        pandas_func = pandas_binops.get(func_name)
+        if pandas_func is not None:
+            new_kwargs.setdefault("axis", "index")
+            return getattr(value_node_df, pandas_func)(*new_args, **new_kwargs)
+
         return func(value_node_df, *new_args, **new_kwargs)
 
 
@@ -76,20 +82,21 @@ class Op(object):
     op = cython.declare(object)
     lhs = cython.declare(object)
 
-    def __init__(self, op, lhs=None):
+    def __init__(self, op, op_name, lhs=None):
         self.op = op
+        self.op_name = op_name
         self.lhs = lhs
 
     def __get__(self, instance, owner=None):
         if instance is not None:
-            return self.__class__(self.op, instance)
-        return self.__class__(self.op, owner)
+            return self.__class__(self.op, self.op_name, instance)
+        return self.__class__(self.op, self.op_name, owner)
 
     def __call__(self, rhs=None):
         args = ()
         if rhs is not None:
             args = (rhs,)
-        return self.lhs._binopnode(func=self.op, args=args)
+        return self.lhs._binopnode(func=self.op, func_name=self.op_name, args=args)
 
 
 binops = [
@@ -106,5 +113,18 @@ binops = [
     "__ne__"
 ]
 
+
+# for vector operations the pandas methods are used directly instead of the
+# operator overloads. This is so 'axis' can be set to 'index' rather than
+# the default 'columns'.
+pandas_binops = {
+    "__add__": "add",
+    "__sub__": "sub",
+    "__mul__": "mul",
+    "__div__": "truediv",
+    "__truediv__": "truediv",
+}
+
+
 for op in binops:
-    MDFNode._additional_attrs_[op] = Op(getattr(operator, op))
+    MDFNode._additional_attrs_[op] = Op(getattr(operator, op), op)

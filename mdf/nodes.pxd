@@ -109,6 +109,7 @@ cdef class MDFVarNode(MDFNode):
     cdef object _default_value
     cdef MDFContext _get_alt_context(self, MDFContext ctx)
     cdef _get_value(self, MDFContext ctx, NodeState node_state)
+    cdef _get_all_values(self, MDFContext ctx, NodeState node_state)
 
 
 cdef class MDFEvalNode(MDFNode):
@@ -145,6 +146,7 @@ cdef class MDFTimeNode(MDFVarNode):
     # C API
     cdef MDFContext _get_alt_context(self, MDFContext ctx)
     cdef _touch(self, NodeState node_state, int flags=?, int _quiet=?, int _depth=?)
+    cdef _get_all_values(self, MDFContext ctx, NodeState node_state)
 
     # public Python API
     cpdef set_value(self, MDFContext ctx, value)

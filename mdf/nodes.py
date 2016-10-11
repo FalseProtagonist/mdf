@@ -10,8 +10,9 @@ import types
 import os
 import re
 from .parser import tokenize, get_assigned_node_name
-from context import MDFContext, MDFNodeBase
-from common import DIRTY_FLAGS
+from .context import MDFContext, MDFNodeBase
+from .common import DIRTY_FLAGS
+import pandas as pa
 
 # PURE PYTHON START (cimported in nodes.pxd)
 from context import _get_current_context, _get_context, _profiling_is_enabled
@@ -1518,6 +1519,16 @@ class MDFVarNode(MDFNode):
         parent = ctx.get_parent() or ctx
         return parent.shift(shift_set)
 
+    def _get_all_values(self, ctx, node_state):
+        """
+        varnodes don't vary over time, so getting all values for a timespan is trivial.
+        """
+        index = ctx._get_node_all_values(_now_node, calling_node=self)
+        if index is not None:
+            value = self._get_value(ctx, node_state)
+            return pa.Series(value, index=index)
+
+
 def varnode(name=None, default=MDFVarNode._no_default_value_, category=None):
     """
     Creates a simple :py:class:`MDFNode` that can have a value assigned
@@ -2086,6 +2097,12 @@ class MDFTimeNode(MDFVarNode):
     def node_type(self):
         """returns the name of the node type of this node"""
         return "now"
+
+    def _get_all_values(self, ctx, node_state):
+        # The cached value is set in the context during 'run'.
+        # If this gets called it means now's been evaluated outside of a
+        # call to 'run' and so shouldn't return a series.
+        return None
 
     def _touch(self, node_state, flags=DIRTY_FLAGS_ALL, _quiet=False, _depth=0):
         # only set the DATETIME flags on dependent nodes

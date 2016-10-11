@@ -14,11 +14,11 @@ from ._nodetypes import dict_iteritems
 
 
 class MDFApplyNode(MDFCustomNode):
-    nodetype_args = ["value_node", "func", "args", "kwargs"]
+    nodetype_args = ["value_node", "func", "func_name", "args", "kwargs"]
     nodetype_node_kwargs = ["value_node"]
 
 
-def _applynode(value_node, func, args=(), kwargs={}):
+def _applynode(value_node, func, func_name=None, args=(), kwargs={}):
     """
     Return a new mdf node that applies `func` to the value of the node
     that is passed in. Extra `args` and `kwargs` can be passed in as
