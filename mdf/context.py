@@ -31,6 +31,7 @@ _python_version = cython.declare(int, sys.version_info[0])
 # imported when MDFContext is constructed
 MDFNode = None
 _now_node = None
+_now_date_node = None
 _pickle_context = None
 _unpickle_context = None
 _pickle_shift_set = None
@@ -133,10 +134,11 @@ class MDFNodeBase(object):
 def _lazy_imports():
     # import MDFNode after this module has been imported
     # to avoid circular import dependencies
-    global MDFNode, _now_node
+    global MDFNode, _now_node, _now_date_node
     import nodes
     MDFNode = nodes.MDFNode
     _now_node = nodes._now_node
+    _now_date_node = nodes._now_node.date
 
     global _pickle_context, _unpickle_context
     import ctx_pickle
@@ -1048,7 +1050,7 @@ class MDFContext(object):
             # node if the context is shifted by now
             if self._finalized \
             and self._shift_set \
-            and not (node is _now_node and node in self._shift_set):
+            and not ((node is _now_node or node is _now_date_node) and _now_node in self._shift_set):
                 raise AttributeError("Shifted contexts are read-only")
 
             # unwrap if necessary
