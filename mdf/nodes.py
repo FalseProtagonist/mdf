@@ -1348,7 +1348,7 @@ class MDFNode(MDFNodeBase):
         node_state.all_values = values
 
         # touch the node to reset the flags and touch and callers
-        self._touch(node_state, DIRTY_FLAGS_FUTURE_DATA, _quiet)
+        self._touch(node_state, DIRTY_FLAGS_FUTURE_DATA | DIRTY_FLAGS_ERROR, _quiet)
 
     def set_all_values(self, ctx, values):
         node_state = self._get_state(ctx)

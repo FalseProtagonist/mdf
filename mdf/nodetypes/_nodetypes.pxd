@@ -1,5 +1,5 @@
 from ..nodes cimport MDFNode, MDFEvalNode, MDFIterator, NodeState
-from ..context cimport MDFContext
+from ..context cimport MDFContext, _get_current_context
 
 cdef dict_iteritems(d)
 

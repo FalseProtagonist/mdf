@@ -11,9 +11,10 @@ from ..nodes import (
     NodeState,
     _isgeneratorfunction,
     _is_member_of,
-    _get_func_name
+    _get_func_name,
+    now
 )
-from ..context import MDFContext
+from ..context import MDFContext, _get_current_context
 from ..ctx_pickle import _unpickle_custom_node, _pickle_custom_node
 import numpy as np
 
@@ -534,11 +535,27 @@ class MDFCustomNode(MDFEvalNode):
         return None
 
     def _cn_eval_func(self):
+        ctx = cython.declare(MDFContext)
+
         # get the inner node value
-        if self._call_with_no_value:
-            value = None
-        elif self._call_with_node:
+        if self._call_with_node:
             value = self._value_node
+
+            #
+            # If we've got a value node check to see if all the data is available,
+            # and if it is return the value directly instead of calling the node func.
+            #
+            # Note: all nodes that can return all data so far take the value as a node,
+            # but that may not always be the case.
+            #
+            if value is not None:
+                ctx = _get_current_context()
+                all_data = ctx._get_all_values(self)
+                if all_data is not None:
+                    return all_data.xs(now())
+
+        elif self._call_with_no_value:
+            value = None
         else:
             value = self._cn_func()
 
