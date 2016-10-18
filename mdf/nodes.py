@@ -1033,6 +1033,11 @@ class MDFNode(MDFNodeBase):
         node_state = cython.declare(NodeState)
         node_state = self._get_state(ctx)
 
+        # inform the node if future data's changed in case it needs to update any internal state
+        if node_state.dirty_flags & DIRTY_FLAGS_FUTURE_DATA == DIRTY_FLAGS_FUTURE_DATA:
+            self._update_all_values(ctx, node_state)
+            node_state.dirty_flags &= ~DIRTY_FLAGS_FUTURE_DATA
+
         # return the cached value if nothing except datetime has changed
         if node_state.has_all_values \
         and node_state.dirty_flags & ~DIRTY_FLAGS_DATETIME == DIRTY_FLAGS_NONE:
@@ -1130,6 +1135,19 @@ class MDFNode(MDFNodeBase):
         """
         return None
 
+    def _update_all_values(self, ctx, node_state):
+        """
+        Called whenever a node is evaluated and any future data has changed since the
+        last time it was evaluated.
+
+        This can be overriden by a subclass to update any internal state (e.g. if it's
+        using an iterator on some pre-calculated values).
+
+        The base class implementation clears any previously calculated values.
+        """
+        node_state.has_all_values = False
+        node_state.all_values = None
+
     # thread_id is passed in to avoid fetching it again later if this has to get another node value
     def get_value(self, ctx, thread_id=None):
         """
@@ -1150,6 +1168,11 @@ class MDFNode(MDFNodeBase):
                 raise KeyError("%s not found in %s" % (self.name, ctx))
 
             return node_state.value
+
+        # inform the node if future data's changed in case it needs to update any internal state
+        if node_state.dirty_flags & DIRTY_FLAGS_FUTURE_DATA == DIRTY_FLAGS_FUTURE_DATA:
+            self._update_all_values(ctx, node_state)
+            node_state.dirty_flags &= ~DIRTY_FLAGS_FUTURE_DATA
 
         # get the alt context this node should be evaluated in (i.e. the least shifted context
         # with all the shifts this node depends on).

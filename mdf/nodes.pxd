@@ -72,6 +72,7 @@ cdef class MDFNode(MDFNodeBase):
     cdef _set_value(self, MDFContext ctx, NodeState node_state, value, int _quiet=?)
     cdef _get_all_values(self, MDFContext ctx, NodeState node_state)
     cdef _set_all_values(self, MDFContext ctx, NodeState node_state, values, int _quiet=?)
+    cdef _update_all_values(self, MDFContext ctx, NodeState node_state)
     cdef MDFNode _get_override(self, MDFContext ctx, NodeState node_state)
 
     # overriden from base class
