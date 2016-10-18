@@ -38,9 +38,11 @@ daterange = pa.bdate_range(datetime(1970, 1, 1), datetime(1970, 1, 10))
 
 df_a = pa.DataFrame([{"A": i, "B": -i} for i in range(len(daterange))], index=daterange, dtype=float)
 df_b = pa.DataFrame([{"A": -i, "B": i} for i in range(len(daterange))], index=daterange, dtype=float)
+series_a = pa.Series([x * 2 for x in range(len(daterange))], index=daterange)
 
 df_node_a = datanode("df_a", df_a)
 df_node_b = datanode("df_b", df_b)
+series_node_a = datanode("series_a", series_a)
 
 varnode_a = varnode(default=1.0)
 varnode_b = varnode(default=2.0)
@@ -121,6 +123,17 @@ class OperatorNodeTest(unittest.TestCase):
         # chained
         actual = self.ctx._get_all_values((df_node_a * df_node_a) * (varnode_a + varnode_b))
         expected = df_a * df_a * 3.0
+        self.assertTrue((actual == expected).all().all())
+
+    def test_broadcasting(self):
+        self._run()
+
+        actual = self.ctx._get_all_values(df_node_a + series_node_a)
+        expected = df_a.add(series_a, axis=0)
+        self.assertTrue((actual == expected).all().all())
+
+        actual = self.ctx._get_all_values(series_node_a + df_node_a)
+        expected = df_a.add(series_a, axis=0)
         self.assertTrue((actual == expected).all().all())
 
     def _test(self, node, expected_values):

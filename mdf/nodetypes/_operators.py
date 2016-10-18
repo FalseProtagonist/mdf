@@ -14,6 +14,7 @@ C = A + B  # C is a node whose result is A() + B()
 """
 from ._nodetypes import nodetype, MDFCustomNode
 from ..nodes import MDFNode
+import pandas as pa
 import operator
 import cython
 import sys
@@ -49,6 +50,15 @@ class MDFBinOpNode(MDFCustomNode):
             if rhs is None:
                 return
 
+        # if one side is a series and the other a dataframe broadcast the series to a dataframe
+        if isinstance(value_node_df, pa.DataFrame) and isinstance(rhs, pa.Series):
+            df_dicts = dict(zip(value_node_df.columns, [rhs] * len(value_node_df.columns)))
+            rhs = pa.DataFrame(df_dicts, columns=value_node_df.columns, index=rhs.index)
+        elif isinstance(value_node_df, pa.Series) and isinstance(rhs, pa.DataFrame):
+            df_dicts = dict(zip(rhs.columns, [value_node_df] * len(rhs.columns)))
+            value_node_df = pa.DataFrame(df_dicts, columns=rhs.columns, index=value_node_df.index)
+
+        # use a pandas function if possible
         pandas_func = pandas_binops.get(op_name)
         if pandas_func is not None:
             return getattr(value_node_df, pandas_func)(rhs, axis="index")
