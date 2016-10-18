@@ -8,6 +8,7 @@ from mdf import (
 
 from datetime import datetime
 import pandas as pa
+import numpy as np
 import unittest
 import logging
 
@@ -137,3 +138,32 @@ class OperatorNodeTest(unittest.TestCase):
 
     def _run(self, *nodes):
         return self._run_for_daterange(self.daterange, *nodes)
+
+
+if __name__ == "__main__":
+    # speed test for improving operator nodes
+    import mdf
+    import time
+
+    logging.basicConfig()
+    mdf.enable_profiling()
+
+    index = pa.date_range(datetime(2001, 1, 1), periods=100000, freq="10min")
+    values = pa.DataFrame({chr(x): np.random.random(len(index)) for x in range(10)}, index=index)
+
+    @mdf.evalnode
+    def breaks_chaining():
+        return 1.0
+
+    # binary operators can be evaluated as a single vector operation but iterative_node needs to be run each timestep
+    data = datanode("data", data=values)
+    add_node = data + data
+    iterative_node = (data * breaks_chaining).label("data_times_one") + data
+
+    start_time = time.time()
+    ctx = run(index, [lambda date, ctx: (ctx[add_node], ctx[iterative_node])])
+    end_time = time.time()
+
+    ctx.ppstats()
+
+    print("Actual total time: %0.2fs" % (end_time - start_time))

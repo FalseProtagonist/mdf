@@ -16,7 +16,7 @@ from ._nodetypes import dict_iteritems
 
 
 class MDFApplyNode(MDFCustomNode):
-    nodetype_args = ["value_node", "func", "func_name", "args", "kwargs"]
+    nodetype_args = ["value_node", "func", "args", "kwargs"]
     nodetype_node_kwargs = ["value_node"]
 
     def _cn_get_all_values(self, ctx, node_state):
@@ -118,7 +118,7 @@ class MDFApplyNode(MDFCustomNode):
         return value_node_df.apply(func, args=args)
 
 
-def _applynode(value_node, func, func_name=None, args=(), kwargs={}):
+def _applynode(value_node, func, args=(), kwargs={}):
     """
     Return a new mdf node that applies `func` to the value of the node
     that is passed in. Extra `args` and `kwargs` can be passed in as

@@ -12,22 +12,18 @@ def B():
 
 C = A + B  # C is a node whose result is A() + B()
 """
-from ._nodetypes import nodetype
-from ._applynode import MDFApplyNode, _applynode
+from ._nodetypes import nodetype, MDFCustomNode
 from ..nodes import MDFNode
 import operator
 import cython
 import sys
 
-# PURE PYTHON START
-from ._nodetypes import dict_iteritems
-# PURE PYTHON END
 
 __all__ = []
 
 
-class MDFBinOpNode(MDFApplyNode):
-    nodetype_args = ["value_node", "func", "func_name", "args", "kwargs"]
+class MDFBinOpNode(MDFCustomNode):
+    nodetype_args = ["value_node", "op", "op_name", "rhs"]
     nodetype_node_kwargs = ["value_node"]
 
     def _cn_get_all_values(self, ctx, node_state):
@@ -41,41 +37,71 @@ class MDFBinOpNode(MDFApplyNode):
             return
 
         node_type_kwargs = self.node_type_kwargs
-        func = node_type_kwargs["func"]
-        func_name = node_type_kwargs.get("func_name", None)
-        args = node_type_kwargs.get("args", ())
-        kwargs = node_type_kwargs.get("kwargs", {})
+        op = node_type_kwargs["op"]
+        op_name = node_type_kwargs["op_name"]
+        rhs = node_type_kwargs.get("rhs", None)
 
-        new_args = []
-        for arg in args:
-            if isinstance(arg, MDFNode):
-                arg = ctx._get_all_values(arg)
-                if arg is None:
-                    return
-            new_args.append(arg)
+        if rhs is None:
+            return op(value_node_df)
 
-        new_kwargs = {}
-        for key, value in dict_iteritems(kwargs):
-            if isinstance(value, MDFNode):
-                value = ctx._get_all_values(value)
-                if value is None:
-                    return
-            new_kwargs[key] = value
+        if isinstance(rhs, MDFNode):
+            rhs = ctx._get_all_values(rhs)
+            if rhs is None:
+                return
 
-        # we know that this nodetype is only constructed with binary operators,
-        # and so the same function can be used on the full dataframes as on the
-        # individual rows.
-        pandas_func = pandas_binops.get(func_name)
+        pandas_func = pandas_binops.get(op_name)
         if pandas_func is not None:
-            new_kwargs.setdefault("axis", "index")
-            return getattr(value_node_df, pandas_func)(*new_args, **new_kwargs)
+            return getattr(value_node_df, pandas_func)(rhs, axis="index")
 
-        return func(value_node_df, *new_args, **new_kwargs)
+        op = node_type_kwargs["op"]
+        return op(value_node_df, rhs)
+
+
+def _binopnode(value_node, op, op_name, rhs=None):
+    """
+    Return a new mdf node that applies a binary operator to two other nodes.
+    """
+    lhs = value_node()
+
+    # it's quicker to switch on the interned operator name than to call the operator
+    op_name_str = cython.declare(str)
+    op_name_str = op_name
+
+    if op_name_str == "__neg__":
+        return -lhs
+    elif op_name_str == "__add__":
+        return lhs + rhs
+    elif op_name_str == "__sub__":
+        return lhs - rhs
+    elif op_name_str == "__mul__":
+        return lhs * rhs
+    elif op_name_str == "__div__" or op_name_str == "__truediv__":
+        return lhs / rhs
+    elif op_name_str == "__lt__":
+        return lhs < rhs
+    elif op_name_str == "__le__":
+        return lhs <= rhs
+    elif op_name_str == "__gt__":
+        return lhs > rhs
+    elif op_name_str == "__ge__":
+        return lhs >= rhs
+    elif op_name_str == "__eq__":
+        return lhs == rhs
+    elif op_name_str == "__ne__":
+        return lhs != rhs
+    elif op_name_str == "__or__":
+        return lhs | rhs
+    elif op_name_str == "__and__":
+        return lhs & rhs
+
+    # we should never get here, but it doesn't hurt if we do
+    if rhs is None:
+        return op(lhs)
+    return op(lhs, rhs)
 
 
 # decorators don't work on cythoned types
-binopnode = nodetype(cls=MDFBinOpNode, node_method="_binopnode")(_applynode)
-
+binopnode = nodetype(cls=MDFBinOpNode, node_method="_binopnode")(_binopnode)
 
 
 class Op(object):
@@ -84,7 +110,7 @@ class Op(object):
 
     def __init__(self, op, op_name, lhs=None):
         self.op = op
-        self.op_name = op_name
+        self.op_name = intern(op_name)
         self.lhs = lhs
 
     def __get__(self, instance, owner=None):
@@ -93,10 +119,7 @@ class Op(object):
         return self.__class__(self.op, self.op_name, owner)
 
     def __call__(self, rhs=None):
-        args = ()
-        if rhs is not None:
-            args = (rhs,)
-        return self.lhs._binopnode(func=self.op, func_name=self.op_name, args=args)
+        return self.lhs._binopnode(op=self.op, op_name=self.op_name, rhs=rhs)
 
 
 binops = [
