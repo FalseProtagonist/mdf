@@ -22,6 +22,22 @@ class MDFReturnsNode(MDFCustomNode):
 
         return returnsiter._get_all_values(ctx)
 
+    def _cn_update_all_values(self, ctx, node_state):
+        """called when the future data has changed"""
+        iterator = cython.declare(MDFCustomNodeIterator)
+        returnsiter = cython.declare(_returnsnode)
+        iterator = node_state.generator
+        if iterator is not None:
+            returnsiter = iterator.get_node_type_generator()
+            all_values = ctx._get_all_values(self._value_node)
+
+            all_filter_values = None
+            filter = self.get_filter()
+            if filter is not None:
+                all_filter_values = ctx._get_all_values(filter)
+
+            return returnsiter._setup_rowiter(all_values, all_filter_values, self)
+
 
 class _returnsnode(MDFIterator):
     """
@@ -72,11 +88,7 @@ class _returnsnode(MDFIterator):
             if filter_node:
                 all_filter_values = ctx._get_all_values(filter_node)
             if all_filter_values is not None or filter_node is None:
-                returns_df = self.__calculate_returns(all_values, all_filter_values, use_diff)
-                self.rowiter = _rowiternode(data=returns_df,
-                                            owner_node=owner_node,
-                                            index_node_type=dt.datetime)
-                self.has_rowiter = True
+                self._setup_rowiter(all_values, all_filter_values, owner_node)
                 return
 
         if self.is_float:
@@ -107,6 +119,20 @@ class _returnsnode(MDFIterator):
         # update the current value
         if filter_node_value:
             self.send(value_node)
+
+    def _setup_rowiter(self, all_values, all_filter_values, owner_node):
+        if all_values is None:
+            if self.has_rowiter:
+                raise AssertionError("returnsnode was previously vectorized but now can't get all source values")
+            self.rowiter = None
+            self.has_rowiter = False
+            return
+
+        returns_df = self.__calculate_returns(all_values, all_filter_values, self.use_diff)
+        self.rowiter = _rowiternode(data=returns_df,
+                                    owner_node=owner_node,
+                                    index_node_type=dt.datetime)
+        self.has_rowiter = True
 
     def __calculate_returns(self, df, filter_mask, use_diff):
         """calculate returns for a dataframe"""

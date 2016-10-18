@@ -9,6 +9,7 @@ from mdf import (
 
 from datetime import datetime
 import pandas as pa
+import numpy as np
 import unittest
 import logging
 
@@ -89,20 +90,51 @@ class DelayNodeTests(unittest.TestCase):
 
         self.assertEqual(expected, actual)
 
+    def test_append_data(self):
+        self._run()
+
+        node = price_series_node.delaynode(periods=1, initial_value=0.0)
+
+        actual = self.ctx._get_all_values(node)
+        expected = price_series.shift(1).fillna(value=0.0)
+        self.assertTrue((actual == expected).all().all())
+
+        # construct some extra data to append to the price series
+        extra_dates = pa.bdate_range(self.daterange[-1] + pa.Timedelta("1D"),
+                                     self.daterange[-1] + pa.Timedelta("7D"))
+        extra_data = pa.Series(np.random.random(len(extra_dates)), index=extra_dates)
+
+        price_series_node.append(extra_data, self.ctx)
+
+        all_prices = pa.concat([price_series, extra_data])
+        all_values = all_prices.shift(1).fillna(value=0.0)
+
+        # advance the context through the extra dates
+        extras = self._run_for_daterange(extra_dates, [node], reset=False)
+
+        actual = pa.Series([x[0] for x in extras], index=extra_dates)
+        expected = all_values.reindex(extra_dates)
+        self.assertTrue((actual.round(9) == expected.round(9)).all().all())
+
+        # check getting all data works too
+        actual = self.ctx._get_all_values(node)
+        expected = all_values
+        self.assertTrue((actual.round(9) == expected.round(9)).all().all())
+
     def _test(self, node, expected_values):
         values = node.queuenode()
         self._run(values)
         actual = self.ctx[values]
         self.assertEquals(list(actual), expected_values)
 
-    def _run_for_daterange(self, date_range, *nodes):
+    def _run_for_daterange(self, date_range, nodes, reset=True):
         results = []
         def callback(date, ctx):
             results.append([ctx[node] for node in nodes])
-        run(date_range, [callback], ctx=self.ctx)
+        run(date_range, [callback], ctx=self.ctx, reset=reset)
         return results
 
     def _run(self, *nodes):
-        return self._run_for_daterange(self.daterange, *nodes)
+        return self._run_for_daterange(self.daterange, nodes)
 
 

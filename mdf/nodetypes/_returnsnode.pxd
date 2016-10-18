@@ -6,6 +6,7 @@ from ..context cimport MDFContext, _get_current_context
 
 cdef class MDFReturnsNode(MDFCustomNode):
     cpdef _cn_get_all_values(self, MDFContext ctx, NodeState node_state)
+    cpdef _cn_update_all_values(self, MDFContext ctx, NodeState node_state)
 
 
 cdef class _returnsnode(MDFIterator):
@@ -24,3 +25,4 @@ cdef class _returnsnode(MDFIterator):
     cpdef send(self, value)
 
     cdef _get_all_values(self, MDFContext ctx)
+    cdef _setup_rowiter(self, all_values, all_filter_values, owner_node)

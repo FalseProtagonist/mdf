@@ -20,6 +20,16 @@ class MDFNanSumNode(MDFCustomNode):
 
         return nansumiter._get_all_values(ctx)
 
+    def _cn_update_all_values(self, ctx, node_state):
+        """called when the future data has changed"""
+        iterator = cython.declare(MDFCustomNodeIterator)
+        nansumiter = cython.declare(_nansumnode)
+        iterator = node_state.generator
+        if iterator is not None:
+            nansumiter = iterator.get_node_type_generator()
+            all_values = ctx._get_all_values(self._value_node)
+            return nansumiter._setup_rowiter(all_values, self)
+
 
 class _nansumnode(MDFIterator):
     """
@@ -59,15 +69,7 @@ class _nansumnode(MDFIterator):
         ctx = _get_current_context()
         all_values = ctx._get_all_values(value_node)
         if all_values is not None:
-            # calculate the cumulative sum, skipping nans
-            summed_values = all_values.cumsum(axis=0, skipna=True)
-
-            # create the simple row iterator with no delay or forward filling
-            # (filtering is done by MDFCustomNode)
-            self.rowiter = _rowiternode(data=summed_values,
-                                        owner_node=owner_node,
-                                        index_node_type=dt.datetime)
-            self.has_rowiter = True
+            self._setup_rowiter(all_values, owner_node)
             return
 
         # Otherwise setup the iterator
@@ -87,6 +89,26 @@ class _nansumnode(MDFIterator):
 
         if filter_node_value:
             self.send(value_node)
+
+    def _setup_rowiter(self, all_values, owner_node):
+        # if all values is None check we didn't previously have an iterator
+        if all_values is None:
+            if self.has_rowiter:
+                raise AssertionError("nansumnode was previously vectorized but now can't get all source values")
+            self.rowiter = None
+            self.has_rowiter = False
+            return
+
+        # calculate the cumulative sum, skipping nans
+        summed_values = all_values.cumsum(axis=0, skipna=True)
+
+        # create the simple row iterator with no delay or forward filling
+        # (filtering is done by MDFCustomNode)
+        self.rowiter = _rowiternode(data=summed_values,
+                                    owner_node=owner_node,
+                                    index_node_type=dt.datetime)
+        self.has_rowiter = True
+        return
 
     def _send_vector(self, value):
         # set any nans in the accumulator where the value is not NaN to zero

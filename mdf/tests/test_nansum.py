@@ -68,16 +68,43 @@ class NanSumNodeTests(unittest.TestCase):
         expected = price_df.cumsum(skipna=True).fillna(method="ffill").fillna(value=0.0)
         self.assertTrue((value == expected).all().all())
 
+    def test_append_data(self):
+        self._run()
 
-    def _run_for_daterange(self, date_range, *nodes):
+        node = price_series_node.nansumnode().ffillnode(initial_value=0.0)
+
+        actual = self.ctx._get_all_values(node)
+        expected = price_series.cumsum(skipna=True).fillna(method="ffill")
+        self.assertTrue((actual == expected).all().all())
+
+        # construct some extra data to append to the price series
+        extra_dates = pa.bdate_range(self.daterange[-1] + pa.Timedelta("1D"),
+                                     self.daterange[-1] + pa.Timedelta("7D"))
+        extra_data = pa.Series(np.random.random(len(extra_dates)), index=extra_dates)
+
+        price_series_node.append(extra_data, self.ctx)
+
+        # advance the context through the extra dates
+        extras = self._run_for_daterange(extra_dates, [node], reset=False)
+
+        actual = pa.Series([x[0] for x in extras], index=extra_dates)
+        expected = extra_data.cumsum(skipna=True).fillna(method="ffill") + expected.ix[-1]
+        self.assertTrue((actual.round(9) == expected.round(9)).all().all())
+
+        # check getting all data works too
+        actual = self.ctx._get_all_values(node)
+        expected = pa.concat([price_series, extra_data]).cumsum(skipna=True).fillna(method="ffill")
+        self.assertTrue((actual.round(9) == expected.round(9)).all().all())
+
+    def _run_for_daterange(self, date_range, nodes, reset=True):
         results = []
         def callback(date, ctx):
             results.append([ctx[node] for node in nodes])
-        run(date_range, [callback], ctx=self.ctx)
+        run(date_range, [callback], ctx=self.ctx, reset=reset)
         return results
 
     def _run(self, *nodes):
-        return self._run_for_daterange(self.daterange, *nodes)
+        return self._run_for_daterange(self.daterange, nodes)
 
 
 if __name__ == "__main__":

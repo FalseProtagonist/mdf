@@ -1,6 +1,6 @@
 from ._nodetypes cimport MDFCustomNode, MDFCustomNodeIterator
 from ._datanode cimport _rowiternode
-from ..nodes cimport MDFIterator, NodeState
+from ..nodes cimport MDFNode, MDFIterator, NodeState
 from ..context cimport MDFContext
 
 
@@ -14,11 +14,15 @@ cdef class MDFDelayNode(MDFCustomNode):
 
     # MDFCustomNode overrides
     cpdef _cn_get_all_values(self, MDFContext ctx, NodeState node_state)
+    cpdef _cn_update_all_values(self, MDFContext ctx, NodeState node_state)
     cpdef dict _get_bind_kwargs(self, owner)
+
 
 cdef class _delaynode(MDFIterator):
     cdef int lazy
+    cdef int periods
     cdef int skip_nans
+    cdef object initial_value
     cdef object queue
     cdef bint has_rowiter
     cdef _rowiternode rowiter
@@ -27,3 +31,4 @@ cdef class _delaynode(MDFIterator):
     cpdef send(self, value)
 
     cdef _get_all_values(self, MDFContext ctx)
+    cdef _setup_rowiter(self, all_values, MDFNode owner_node)

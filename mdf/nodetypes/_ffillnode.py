@@ -20,6 +20,16 @@ class MDFForwardFillNode(MDFCustomNode):
 
         return ffilliter._get_all_values(ctx)
 
+    def _cn_update_all_values(self, ctx, node_state):
+        """called when the future data has changed"""
+        iterator = cython.declare(MDFCustomNodeIterator)
+        ffilliter = cython.declare(_ffillnode)
+        iterator = node_state.generator
+        if iterator is not None:
+            ffilliter = iterator.get_node_type_generator()
+            all_values = ctx._get_all_values(self._value_node)
+            return ffilliter._setup_rowiter(all_values, self)
+
 
 class _ffillnode(MDFIterator):
     """
@@ -51,6 +61,7 @@ class _ffillnode(MDFIterator):
 
     def __init__(self, value_node, filter_node, owner_node, initial_value=None):
         self.is_float = False
+        self.initial_value = initial_value
 
         self.has_rowiter = False
         self.rowiter = None
@@ -60,17 +71,7 @@ class _ffillnode(MDFIterator):
         ctx = _get_current_context()
         all_values = ctx._get_all_values(value_node)
         if all_values is not None:
-            # forward fill
-            all_values = all_values.fillna(method="ffill")
-            if initial_value is not None:
-                all_values = all_values.fillna(value=initial_value)
-
-            # create the simple row iterator with no delay or forward filling
-            # (filtering is done by MDFCustomNode)
-            self.rowiter = _rowiternode(data=all_values,
-                                        owner_node=owner_node,
-                                        index_node_type=dt.datetime)
-            self.has_rowiter = True
+            self._setup_rowiter(all_values, owner_node)
             return
 
         # Otherwise set up the iterator
@@ -116,6 +117,27 @@ class _ffillnode(MDFIterator):
         # update the current value
         if filter_node_value:
             self.send(value_node)
+
+    def _setup_rowiter(self, all_values, owner_node):
+        # if all values is None check we didn't previously have an iterator
+        if all_values is None:
+            if self.has_rowiter:
+                raise AssertionError("ffillnode was previously vectorized but now can't get all source values")
+            self.rowiter = None
+            self.has_rowiter = False
+            return
+
+        # forward fill
+        all_values = all_values.fillna(method="ffill")
+        if self.initial_value is not None:
+            all_values = all_values.fillna(value=self.initial_value)
+
+        # create the simple row iterator with no delay or forward filling
+        # (filtering is done by MDFCustomNode)
+        self.rowiter = _rowiternode(data=all_values,
+                                    owner_node=owner_node,
+                                    index_node_type=dt.datetime)
+        self.has_rowiter = True
 
     def next(self):
         if self.has_rowiter:

@@ -123,6 +123,16 @@ class MDFDelayNode(MDFCustomNode):
 
         return delayiter._get_all_values(ctx)
 
+    def _cn_update_all_values(self, ctx, node_state):
+        """called when the future data has changed"""
+        iterator = cython.declare(MDFCustomNodeIterator)
+        delayiter = cython.declare(_delaynode)
+        iterator = node_state.generator
+        if iterator is not None:
+            delayiter = iterator.get_node_type_generator()
+            all_values = ctx._get_all_values(self._value_node)
+            return delayiter._setup_rowiter(all_values, self)
+
     def on_set_date(self, ctx_, date, flags):
         """called just before 'now' is advanced"""
         ctx = cython.declare(MDFContext)
@@ -249,6 +259,8 @@ class _delaynode(MDFIterator):
                  initial_value=None, lazy=False, ffill=False, owner_node=None):
         self.lazy = lazy
         self.skip_nans = ffill
+        self.periods = periods
+        self.initial_value = initial_value
         self.has_rowiter = False
         self.rowiter = None
         max_queue_size = 0
@@ -259,22 +271,7 @@ class _delaynode(MDFIterator):
             ctx = _get_current_context()
             all_values = ctx._get_all_values(value_node)
             if all_values is not None:
-                # the data is indexed by 'now' so it can be shifted by periods
-                all_values = all_values.shift(periods)
-                if initial_value is not None:
-                    all_values.ix[:periods] = initial_value
-
-                # forward fill if necessary
-                if ffill:
-                    all_values = all_values.fillna(method="ffill")
-
-                # create the simple row iterator with no delay or forward filling
-                # (filtering is done by MDFCustomNode)
-                self.rowiter = _rowiternode(data=all_values,
-                                            owner_node=owner_node,
-                                            index_node_type=dt.datetime)
-                self.has_rowiter = True
-                return
+                self._setup_rowiter(all_values, owner_node)
 
         value = value_node()
         filter_node_value = True
@@ -310,6 +307,30 @@ class _delaynode(MDFIterator):
         # since it needs to be filtered based on the previous filter value.
         if filter_node_value or lazy:
             self.send(value_node)
+
+    def _setup_rowiter(self, all_values, owner_node):
+        if all_values is None:
+            if self.has_rowiter:
+                raise AssertionError("delaynode was previously vectorized but now can't get all source values")
+            self.rowiter = None
+            self.has_rowiter = False
+            return
+
+        # the data is indexed by 'now' so it can be shifted by periods
+        all_values = all_values.shift(self.periods)
+        if self.initial_value is not None:
+            all_values.ix[:self.periods] = self.initial_value
+
+        # forward fill if necessary
+        if self.skip_nans:
+            all_values = all_values.fillna(method="ffill")
+
+        # create the simple row iterator with no delay or forward filling
+        # (filtering is done by MDFCustomNode)
+        self.rowiter = _rowiternode(data=all_values,
+                                    owner_node=owner_node,
+                                    index_node_type=dt.datetime)
+        self.has_rowiter = True
 
     def next(self):
         if self.has_rowiter:

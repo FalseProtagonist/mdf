@@ -534,6 +534,14 @@ class MDFCustomNode(MDFEvalNode):
         """Override in subclass if all values can be returned"""
         return None
 
+    def _update_all_values(self, ctx, node_state):
+        """called after future data has been added"""
+        return self._cn_update_all_values(ctx, node_state)
+
+    def _cn_update_all_values(self, ctx, node_state):
+        """Override in subclass if anything should be done when future data is added"""
+        return None
+
     def _cn_eval_func(self):
         ctx = cython.declare(MDFContext)
 

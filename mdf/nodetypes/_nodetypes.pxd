@@ -26,11 +26,13 @@ cdef class MDFCustomNode(MDFEvalNode):
 
     # MDFNode overrides
     cdef _get_all_values(self, MDFContext ctx, NodeState node_state)
+    cdef _update_all_values(self, MDFContext ctx, NodeState node_state)
     cpdef dict _get_bind_kwargs(self, owner)
 
     # protected python methods
     cpdef _cn_eval_func(self)
     cpdef _cn_get_all_values(self, MDFContext ctx, NodeState node_state)
+    cpdef _cn_update_all_values(self, MDFContext ctx, NodeState node_state)
 
 
 cdef class MDFCustomNodeIterator(MDFIterator):
