@@ -4,7 +4,8 @@ from mdf import (
     queuenode,
     delaynode,
     datanode,
-    run
+    run,
+    now
 )
 
 from datetime import datetime
@@ -120,6 +121,32 @@ class DelayNodeTests(unittest.TestCase):
         actual = self.ctx._get_all_values(node)
         expected = all_values
         self.assertTrue((actual.round(9) == expected.round(9)).all().all())
+
+    def test_append_now(self):
+        self._run()
+
+        node = now.date.delaynode(periods=1, initial_value=self.daterange[0].date())
+        expected = pa.Series(self.daterange.date, index=self.daterange).shift(1).fillna(self.daterange[0].date())
+        actual = self.ctx._get_all_values(node)
+
+        self.assertTrue((actual == expected).all().all())
+
+        extra_dates = pa.bdate_range(self.daterange[-1] + pa.Timedelta("1D"),
+                                     self.daterange[-1] + pa.Timedelta("7D"))
+
+        extras = self._run_for_daterange(extra_dates, [node], reset=False)
+
+        all_dates = list(self.daterange.date) + list(extra_dates.date)
+        all_values = pa.Series(all_dates, index=all_dates).shift(1).fillna(self.daterange[0].date())
+
+        actual = pa.Series([x[0] for x in extras], index=extra_dates)
+        expected = all_values.reindex(extra_dates)
+        self.assertTrue((actual == expected).all().all())
+
+        # check getting all data works too
+        actual = self.ctx._get_all_values(node)
+        expected = all_values
+        self.assertTrue((actual == expected).all().all())
 
     def _test(self, node, expected_values):
         values = node.queuenode()

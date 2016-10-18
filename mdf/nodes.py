@@ -2161,8 +2161,8 @@ class MDFDateTimeNode(MDFVarNode):
         return None
 
     def _touch(self, node_state, flags=DIRTY_FLAGS_ALL, _quiet=False, _depth=0):
-        # only set the DATETIME flags on dependent nodes
-        MDFVarNode._touch(self, node_state, flags & DIRTY_FLAGS_DATETIME, _quiet, _depth)
+        # only set the DATETIME and FUTURE_DATA flags on dependent nodes
+        MDFVarNode._touch(self, node_state, flags & (DIRTY_FLAGS_DATETIME | DIRTY_FLAGS_FUTURE_DATA), _quiet, _depth)
 
         # but clear all flags on this node
         node_state.dirty_flags &= ~flags
@@ -2202,8 +2202,8 @@ class MDFDateNode(MDFVarNode):
             return pa.Series(datetimes.index.date, index=datetimes.index)
 
     def _touch(self, node_state, flags=DIRTY_FLAGS_ALL, _quiet=False, _depth=0):
-        # only set the DATE flags on dependent nodes
-        MDFVarNode._touch(self, node_state, flags & DIRTY_FLAGS_DATE, _quiet, _depth)
+        # only set the DATE and FUTURE_DATA flags on dependent nodes
+        MDFVarNode._touch(self, node_state, flags & (DIRTY_FLAGS_DATE | DIRTY_FLAGS_FUTURE_DATA), _quiet, _depth)
 
         # but clear all flags on this node
         node_state.dirty_flags &= ~flags
