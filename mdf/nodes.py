@@ -1537,7 +1537,7 @@ class MDFVarNode(MDFNode):
             return node_state.value
 
         if self._default_value is self._no_default_value_:
-            raise
+            raise ValueError("varnode '%s' has no value" % self.name)
 
         return self._default_value
 
