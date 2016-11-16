@@ -15,8 +15,11 @@ import time
 import multiprocessing.util
 from multiprocessing import Process, Pipe
 
-from matplotlib import cm
-import matplotlib.pyplot as pp
+try:
+    from matplotlib import cm
+    import matplotlib.pyplot as pp
+except (ImportError, RuntimeError):
+    pass
 
 from .builders import CSVWriter, DataFrameBuilder, FinalValueCollector
 

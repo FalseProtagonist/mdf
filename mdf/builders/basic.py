@@ -8,9 +8,13 @@ from collections import deque, defaultdict
 import datetime
 import operator
 import csv
-import matplotlib.pyplot as pp
 import sys
 import types
+
+try:
+    import matplotlib.pyplot as pp
+except (ImportError, RuntimeError):
+    pass
 
 if sys.version_info[0] > 2:
     basestring = str

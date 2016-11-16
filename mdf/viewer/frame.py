@@ -12,13 +12,18 @@ import sys
 import logging
 import pandas as pd
 import numpy as np
-import matplotlib.pyplot
 from datetime import datetime, timedelta
 from collections import deque
 from ..runner import run
 from ..builders import DataFrameBuilder
 from ..nodes import MDFVarNode
 import traceback
+
+try:
+    import matplotlib.pyplot
+    _matplotlib_imported = True
+except (ImportError, RuntimeError):
+    _matplotlib_imported = False
 
 try:
     import excel
@@ -49,9 +54,11 @@ _default_pycrust_locals = {
     "pa"                : pd,
     "pandas"            : pd,
     "np"                : np,
-    "numpy"             : np,
-    "pyplot"            : matplotlib.pyplot,
+    "numpy"             : np
 }
+
+if _matplotlib_imported:
+    _default_pycrust_locals["pyplot"] = matplotlib.pyplot
 
 if excel is not None:
     _default_pycrust_locals["export_dataframe"] = excel.export_dataframe
