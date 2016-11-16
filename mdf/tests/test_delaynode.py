@@ -148,6 +148,33 @@ class DelayNodeTests(unittest.TestCase):
         expected = all_values
         self.assertTrue((actual == expected).all().all())
 
+    def test_delayed_now(self):
+        # check now.date != now.date.delaynode(periods=1) with a time series with intraday points
+        timespan = pa.date_range('2016-01-01', periods=240, freq='1H')
+        node = now.date == now.date.delaynode(periods=1, initial_value=timespan[0].date())
+
+        dates = pa.Series(timespan.date, index=timespan)
+        expected = dates == dates.shift(1).fillna(value=timespan.date[0])
+
+        # check running for the time range works
+        actual = self._run_for_daterange(timespan, [node])
+        actual = pa.Series([x[0] for x in actual], index=timespan)
+        self.assertTrue((actual == expected).all().all())
+
+        # check getting all values works
+        actual = self.ctx._get_all_values(node)
+        self.assertTrue((actual == expected).all().all())
+
+        # check running for subsequent datetimes works
+        extra_dates = pa.bdate_range(timespan[-1] + pa.Timedelta("1H"), periods=240, freq='1H')
+        extras = self._run_for_daterange(extra_dates, [node], reset=False)
+
+        dates = pa.Series((extra_dates).date, index=extra_dates)
+        expected = dates == dates.shift(1).fillna(value=timespan.date[-1])
+        actual = pa.Series([x[0] for x in extras], index=extra_dates)
+        self.assertTrue((actual == expected).all().all())
+
+
     def _test(self, node, expected_values):
         values = node.queuenode()
         self._run(values)
