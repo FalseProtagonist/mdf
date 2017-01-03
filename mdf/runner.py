@@ -2,7 +2,7 @@
 Convenience functions for creating a context and evaluating nodes
 for a range of dates and collecting the results.
 """
-from .context import MDFContext, NodeOrBuilderTimer, _profiling_is_enabled
+from .context import MDFContext, profiling_is_enabled
 from .nodes import MDFNode
 from datetime import datetime
 import numpy as np
@@ -15,8 +15,11 @@ import time
 import multiprocessing.util
 from multiprocessing import Process, Pipe
 
-from matplotlib import cm
-import matplotlib.pyplot as pp
+try:
+    from matplotlib import cm
+    import matplotlib.pyplot as pp
+except (ImportError, RuntimeError):
+    pass
 
 from .builders import CSVWriter, DataFrameBuilder, FinalValueCollector
 
@@ -27,6 +30,7 @@ except ImportError:
 
 _logger = logging.getLogger(__name__)
 
+
 def _create_context(date, values={}, ctx=None, **kwargs):
     if ctx is None:
         ctx = MDFContext(date)
@@ -36,6 +40,7 @@ def _create_context(date, values={}, ctx=None, **kwargs):
     for key, value in kwargs.items():
         ctx.set_value(key, value)
     return ctx
+
 
 def _localize(dt, tzinfo):
     """
@@ -51,17 +56,19 @@ def _localize(dt, tzinfo):
     except AttributeError:
         return dt.replace(tzinfo=tzinfo)
 
+
 def run(date_range,
         callbacks=[],
         values={},
         shifts=None,
         filter=None,
+        reset=True,
         ctx=None,
         num_processes=0,
         tzinfo=None,
         **kwargs):
     """
-    creates a context and iterates through the dates in the
+    Creates a context and iterates through the dates in the
     date range updating the context and calling the callbacks
     for each date.
 
@@ -77,17 +84,29 @@ def run(date_range,
 
     Any time-dependent nodes are reset before starting by setting the context's
     date to datetime.min (after applying time zone information if available).
+
+    :param date_range: Iterable of datetimes to run for.
+    :param callbacks: Set of callable objects to call on each time step.
+    :param values: Values for varnodes to set when initializing the context.
+    :param shifts: Set of shift sets to be applied to the base context.
+    :param filter: Node to use as a filter. If not None, the callbacks will only be
+                   called when the value of the filter is True.
+    :param reset: If True (default) the context will be reset before starting. This
+                  means any iterator/generator nodes will be restarted.
+    :param ctx: Context the evaluations will be performed in. If None a context
+                will be created.
+    :param num_processes: If running with shift sets this sets the maximum number of
+                          processes to use. The default (0) is to only use the current
+                          process.
+    :param tzinfo: Timezone of the dates used.
+    :param kwargs: Additional values to set in the base context.
     """
     unshifted_ctx = _create_context(date_range[0], values, ctx, **kwargs)
     contexts = [unshifted_ctx]
     callbacks_per_ctx = {}
     generators_per_ctx = {}
 
-    profiling_enabled = _profiling_is_enabled()
-
-    # The time to use for resetting time dependent nodes. 
-    # Note: strftime() methods requires year >= 1900 
-    adj_datetime_min = datetime(1900, 1, 1)
+    profiling_enabled = profiling_is_enabled()
 
     # Attempt to guess the tzinfo from the date range if one isn't specified explicitly
     if tzinfo is None:
@@ -98,9 +117,14 @@ def run(date_range,
             # In a list of dates, look at the first item
             tzinfo = date_range[0].tzinfo
 
-    # ensure that any time-dependent nodes are reset before running through
+    # Ensure that any time-dependent nodes are reset before running through
     # the date range by setting the current date on the context to the default.
-    unshifted_ctx.set_date(adj_datetime_min if tzinfo is None else _localize(adj_datetime_min, tzinfo))
+    if reset:
+        adj_datetime_min = datetime(1900, 1, 1)  # strftime() methods requires year >= 1900
+        unshifted_ctx.set_date(adj_datetime_min if tzinfo is None else _localize(adj_datetime_min, tzinfo))
+        unshifted_ctx._set_date_range(date_range)
+    else:
+        unshifted_ctx._extend_date_range(date_range)
 
     if shifts:
         if num_processes > 0:
@@ -165,6 +189,7 @@ def run(date_range,
         return contexts
     return unshifted_ctx
 
+
 def _start_remote_server(argv, pipe):
     """
     function for use with multiprocessing.Process object for creating
@@ -172,6 +197,7 @@ def _start_remote_server(argv, pipe):
     """
     from .remote import start_server
     start_server(pipe=pipe)
+
 
 def _run_multiprocess(date_range, callbacks, shifts, filter, num_processes, unshifted_ctx):
     """
@@ -293,6 +319,7 @@ def _run_multiprocess(date_range, callbacks, shifts, filter, num_processes, unsh
             with remote_api:
                 remote_api.shutdown()
 
+
 @atexit.register
 def _multprocessing_exit():
     """
@@ -310,6 +337,7 @@ def _multprocessing_exit():
 
     multiprocessing.util._run_finalizers()
 
+
 def to_csv(fh, date_range, nodes, columns=None, values={}, filter=None, ctx=None, tzinfo=None, **kwargs):
     """
     evaluates a list of nodes for each date in date_range
@@ -317,6 +345,7 @@ def to_csv(fh, date_range, nodes, columns=None, values={}, filter=None, ctx=None
     """
     writer = CSVWriter(fh, nodes, columns)
     return run(date_range, [writer], values=values, filter=filter, ctx=ctx, tzinfo=tzinfo, **kwargs)
+
 
 def build_dataframe(date_range, nodes, values={}, filter=None, ctx=None, tzinfo=None, **kwargs):
     """
@@ -327,6 +356,7 @@ def build_dataframe(date_range, nodes, values={}, filter=None, ctx=None, tzinfo=
     run(date_range, [builder], values=values, filter=filter, ctx=ctx, tzinfo=tzinfo, **kwargs)
     return builder.dataframe
 
+
 def plot(date_range, nodes, values={}, filter=None, ctx=None, tzinfo=None, show=True, plot_args={}, **kwargs):
     """
     evaluates a list of nodes for each date in date_range
@@ -335,6 +365,7 @@ def plot(date_range, nodes, values={}, filter=None, ctx=None, tzinfo=None, show=
     builder = DataFrameBuilder(nodes)
     run(date_range, [builder], values=values, filter=filter, ctx=ctx, tzinfo=tzinfo, **kwargs)
     builder.plot(show=show, **plot_args)
+
 
 def get_final_values(date_range, nodes, values={}, filter=None, ctx=None, tzinfo=None, **kwargs):
     """
@@ -353,6 +384,7 @@ def get_final_values(date_range, nodes, values={}, filter=None, ctx=None, tzinfo
     if return_as_list:
         return values
     return values[0]
+
 
 def scenario(date_range,
                 result_node,
@@ -398,6 +430,7 @@ def scenario(date_range,
 
     return array
 
+
 def plot_surface(date_range,
                  result_node,
                  x_node, x_shifts,
@@ -439,6 +472,7 @@ def plot_surface(date_range,
     pp.show()
 
     return results
+
 
 def heatmap(date_range,
             result_node,

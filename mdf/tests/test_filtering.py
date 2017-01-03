@@ -35,11 +35,14 @@ index = pa.Index([datetime(1991, 12, 31),
 data = pa.Series([1, 2, 3, 4, 5, 6, 7, 8, 9, 10], index=index, dtype=float)
 datanode = mdf.datanode("data", data)
 
+indexnode = mdf.datanode("index", pa.Series(index, index))
+
 df = pa.DataFrame({"A" : [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
                    "B" : [np.nan, 9, 8, np.nan, 6, 5, 4, 3, 2, 1]},
                         index=index, dtype=float)
 dfnode = mdf.datanode("df", df)
 
+# this filter starts with False as generators should still be started even if the first iteration is filtered
 filter = pa.Series([False, True, False, True, False,
                     True, False, True, False, True], index=index)
 filternode = mdf.datanode("filter", filter)
@@ -64,6 +67,11 @@ cumprod_filtered_expected = data[filter].cumprod().reindex(index).ffill()
 
 cumprod_df_expected = df.cumprod().ffill()
 cumprod_df_filtered_expected = df[filter].cumprod().reindex(index).ffill()
+
+
+@evalnode
+def non_generator_node():
+    return data.ix[indexnode()]
 
 
 def _normalize(x):
@@ -136,6 +144,17 @@ class NodeFilterTest(unittest.TestCase):
 
         actual = self._run(dfnode.cumprodnode(filter=filternode))
         self.assertEqual(_normalize(actual), _normalize(cumprod_df_filtered_expected))
+
+    def test_non_generator_node(self):
+        actual = self._run(non_generator_node)
+        self.assertEqual(_normalize(actual), _normalize(data))
+
+        # use the inverse filter used by the generators as we need the initial value to be non-None
+        invfilter = ~filter
+        invfilternode = mdf.datanode("invfilter", invfilter)
+
+        actual = self._run(non_generator_node.filternode(filter=invfilternode))
+        self.assertEqual(_normalize(actual), _normalize(data[invfilter].reindex(index, method="ffill")))
 
     def _run(self, node):
         result = []

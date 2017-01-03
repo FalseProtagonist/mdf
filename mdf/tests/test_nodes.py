@@ -6,14 +6,10 @@ from mdf import (
     cumprodnode,
     delaynode,
     ffillnode,
-    vargroup,
-    datanode,
-    run,
-    DataFrameBuilder
+    vargroup
 )
 
 from datetime import datetime
-from numpy.testing.utils import assert_almost_equal
 import pandas as pd
 import numpy as np
 import unittest
@@ -80,38 +76,6 @@ def B():
 def A_plus_B():
     return A() + B()
 
-@evalnode
-def Counter():
-    accum = -2.0
-    while True:
-        if accum != 0.0:
-            yield accum
-        accum += 0.5
-
-class DelayNodeTest(object): 
-
-    @evalnode
-    def initial_value(cls):
-        return 0
-
-    @delaynode(periods=1, initial_value=initial_value)
-    def delayed_node(cls):
-        i = 1
-        while True:
-            yield i
-            i += 1
-
-    @delaynode(periods=1, initial_value=initial_value, lazy=True)
-    def delayed_node_lazy(cls):
-        return cls.delay_test()[-1]
-
-    @queuenode
-    def delay_test(cls):
-        return 1 + cls.delayed_node()
-
-    @queuenode
-    def delay_test_lazy(cls):
-        return 1 + cls.delayed_node_lazy()
 
 @queuenode
 def ffill_queue():
@@ -181,13 +145,6 @@ class NodeTest(unittest.TestCase):
         cumprod = self.ctx[cumprod_output]
         self.assertEqual(cumprod, 14201189062704000)
 
-    def test_delaynode(self):
-        self._run(DelayNodeTest.delay_test, DelayNodeTest.delay_test_lazy)
-        value =  self.ctx[DelayNodeTest.delay_test]
-        value_lazy =  self.ctx[DelayNodeTest.delay_test_lazy]
-        self.assertEqual(list(value), list(range(1, len(self.daterange)+1)))
-        self.assertEqual(list(value_lazy), list(range(1, len(self.daterange)+1)))
-
     def test_ffillnode(self):
         self._run(ffill_queue)
         value =  self.ctx[ffill_queue]
@@ -200,34 +157,6 @@ class NodeTest(unittest.TestCase):
         self.assertTrue(np.isnan(unfilled_value).all())
         self.assertEquals(value.tolist(), [10., 10., 10., 10., 10.])
 
-    def test_datanode_ffill(self):
-        data = pd.Series(range(len(self.daterange)), self.daterange, dtype=float)
-        data = data[[bool(i % 2) for i in range(len(data.index))]]
-
-        expected = data.reindex(self.daterange, method="ffill")
-        expected[np.isnan(expected)] = np.inf
-
-        node = datanode("test_datanode_ffill", data, ffill=True, missing_value=np.inf)
-        qnode = node.queuenode()
-
-        self._run(qnode)
-        value = self.ctx[qnode]
-
-        self.assertEquals(list(value), expected.values.tolist())
-
-    def test_lookahead_node(self):
-        B_queue = B.queuenode()
-        B_lookahead = B.lookaheadnode(periods=len(self.daterange))
-
-        self.ctx.set_date(self.daterange[0])
-        actual = self.ctx[B_lookahead]
-
-        self._run(B_queue)
-        expected = self.ctx[B_queue]
-
-        self.assertEquals(actual.values.tolist(), list(expected))
-        self.assertEquals(actual.index.tolist(), list(self.daterange))
-    
     def test_apply_node(self):
         actual_node = A.applynode(func=operator.add, args=(B,)).queuenode()
         expected_node = A_plus_B.queuenode()
@@ -237,25 +166,6 @@ class NodeTest(unittest.TestCase):
         expected = self.ctx[expected_node]
 
         self.assertEquals(actual, expected)
-
-    def test_binary_operators_with_constant(self):
-        self._test(Counter,            [-2.0, -1.5, -1.0, -0.5,  0.5,  1.0,  1.5])
-        self._test(Counter + 0.2,      [-1.8, -1.3, -0.8, -0.3,  0.7,  1.2,  1.7])
-        self._test(Counter - 0.2,      [-2.2, -1.7, -1.2, -0.7,  0.3,  0.8,  1.3])
-        self._test(Counter * 2.0,      [-4.0, -3.0, -2.0, -1.0,  1.0,  2.0,  3.0])
-        self._test(Counter / 0.5,      [-4.0, -3.0, -2.0, -1.0,  1.0,  2.0,  3.0])
-
-        self._test(0.2 + Counter,      [-1.8, -1.3, -0.8, -0.3,  0.7,  1.2,  1.7])
-        self._test(1.0 - Counter,      [ 3.0,  2.5,  2.0,  1.5,  0.5,  0.0, -0.5])
-        self._test(2.0 * Counter,      [-4.0, -3.0, -2.0, -1.0,  1.0,  2.0,  3.0])
-        self._test(12 / (Counter+.25), [-6.8571428571428568, -9.6000000000000014, -16.0,
-                                        -48.0, 16.0, 9.6000000000000014, 6.8571428571428568])
-
-    def test_binary_operators_with_node(self):
-        self._test(Counter + Counter,  [-4.0, -3.0, -2.0, -1.0,  1.0,  2.0,  3.0])
-        self._test(Counter - Counter,  [ 0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0])
-        self._test(Counter * Counter,  [ 4.0,  2.25, 1.0,  0.25, 0.25, 1.0,  2.25])
-        self._test(Counter / Counter,  [ 1.0,  1.0,  1.0,  1.0,  1.0,  1.0,  1.0])
         
     def _test(self, node, expected_values):
         values = node.queuenode()

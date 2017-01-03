@@ -1,10 +1,12 @@
+from cpython.datetime cimport import_datetime, datetime
 from context cimport MDFContext, MDFNodeBase
-from context cimport _get_current_context, _get_context, _profiling_enabled
+from context cimport _get_current_context, _get_context, _profiling_is_enabled
 from cqueue cimport *
 
 cdef int DIRTY_FLAGS_NONE
 cdef int DIRTY_FLAGS_ALL
 cdef int DIRTY_FLAGS_TIME
+
 
 cdef class NodeState(object):
     cdef object ctx_id
@@ -30,8 +32,16 @@ cdef class NodeState(object):
     cdef MDFContext prev_alt_context
     cdef object generator
 
+    # certain nodes track all values (past and future) for use by nodetypes.
+    # For example, 'now' inside 'run' has all values so that nodetypes know
+    # the timespan of the current run.
+    cdef bint has_all_values
+    cdef object all_values
+
+
 cdef class MDFIterator(object):
     cpdef next(self)
+
 
 cdef class MDFNode(MDFNodeBase):
     # from base class
@@ -56,16 +66,21 @@ cdef class MDFNode(MDFNodeBase):
     cdef _depends_on(self, NodeState node_state, MDFNode other, other_ctx_id)
     cdef _set_dirty(self, NodeState node_state, int flags, int _depth)
     cdef _touch(self, NodeState node_state, int flags=?, int _quiet=?, int _depth=?)
-    cdef _get_cached_value_and_date(self, MDFContext ctx, NodeState node_state)
     cdef MDFContext _get_alt_context(self, MDFContext ctx)
+    cdef _setup_generator(self, MDFContext ctx, NodeState node_state)
     cdef _get_value(self, MDFContext ctx, NodeState node_state)
     cdef _set_value(self, MDFContext ctx, NodeState node_state, value, int _quiet=?)
+    cdef _get_all_values(self, MDFContext ctx, NodeState node_state)
+    cdef _set_all_values(self, MDFContext ctx, NodeState node_state, values, int _quiet=?)
+    cdef _update_all_values(self, MDFContext ctx, NodeState node_state)
     cdef MDFNode _get_override(self, MDFContext ctx, NodeState node_state)
 
     # overriden from base class
     cdef MDFContext get_alt_context(self, MDFContext ctx)
     cdef _add_dependency(self, MDFContext ctx, MDFNodeBase called_node, MDFContext called_ctx)
     cdef get_value(self, MDFContext ctx, thread_id=?)
+    cdef get_all_values(self, MDFContext ctx, thread_id=?)
+    cdef set_all_values(self, MDFContext ctx, values)
 
     # semi-public API for MDFContext to use
     cpdef _get_cached_value(self, MDFContext ctx)
@@ -90,10 +105,13 @@ cdef class MDFNode(MDFNodeBase):
     cpdef MDFNode get_override(self, MDFContext ctx)
     cpdef get_state(self, MDFContext)
 
+
 cdef class MDFVarNode(MDFNode):
     cdef object _default_value
     cdef MDFContext _get_alt_context(self, MDFContext ctx)
     cdef _get_value(self, MDFContext ctx, NodeState node_state)
+    cdef _get_all_values(self, MDFContext ctx, NodeState node_state)
+
 
 cdef class MDFEvalNode(MDFNode):
     cdef object _func
@@ -108,10 +126,12 @@ cdef class MDFEvalNode(MDFNode):
     cdef _get_value(self, MDFContext ctx, NodeState node_state)
     cdef MDFContext _get_alt_context(self, MDFContext ctx)
     cdef _set_value(self, MDFContext ctx, NodeState node_state, value, int _quiet=?)
+    cdef _set_all_values(self, MDFContext ctx, NodeState node_state, values, int _quiet=?)
     cdef _fixup_alt_context(self, MDFContext ctx, NodeState node_state, MDFContext alt_ctx)
 
     # protected Python API
-    cpdef _bind(self, MDFEvalNode other, owner)
+    cpdef dict _get_bind_kwargs(self, owner)
+    cpdef MDFEvalNode _bind(self, owner, base_cls)
     cpdef _bind_function(self, func, owner)
     cpdef _get_func_name(self, func)
     cpdef _validate_func(self, func)
@@ -122,11 +142,23 @@ cdef class MDFEvalNode(MDFNode):
     cpdef get_filter(self)
     cpdef set_value(self, MDFContext ctx, value)
 
-cdef class MDFTimeNode(MDFVarNode):
+
+cdef class MDFDateTimeNode(MDFVarNode):
+    cdef MDFVarNode date_node
+
     # C API
     cdef MDFContext _get_alt_context(self, MDFContext ctx)
     cdef _touch(self, NodeState node_state, int flags=?, int _quiet=?, int _depth=?)
+    cdef _get_all_values(self, MDFContext ctx, NodeState node_state)
 
     # public Python API
     cpdef set_value(self, MDFContext ctx, value)
 
+
+cdef class MDFDateNode(MDFVarNode):
+    cdef MDFDateTimeNode owner
+
+    # C API
+    cdef MDFContext _get_alt_context(self, MDFContext ctx)
+    cdef _touch(self, NodeState node_state, int flags=?, int _quiet=?, int _depth=?)
+    cdef _get_all_values(self, MDFContext ctx, NodeState node_state)

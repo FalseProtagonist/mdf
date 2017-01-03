@@ -42,6 +42,7 @@ __all__ = [
     "CSVWriter",
     "DataFrameBuilder",
     "NodeLogger",
+    "DIRTY_FLAGS",
 
     # settings
     "enable_profiling",
@@ -106,6 +107,10 @@ from .builders import (
 
 from .remote.serializer import (
     disable_custom_pyro_serialization
+)
+
+from .common import (
+    DIRTY_FLAGS
 )
 
 from . import context

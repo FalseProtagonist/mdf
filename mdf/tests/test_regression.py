@@ -23,6 +23,7 @@ def remote_server_init_func(startup_data):
     _cfg = startup_data["cfg"]
     assert _cfg["paramA"], "A"
 
+@unittest.skip
 class RemoteTest(unittest.TestCase):
 
     def test_regression_contexts(self):

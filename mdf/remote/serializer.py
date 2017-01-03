@@ -7,8 +7,6 @@ bz2 is used as it was found to be faster than zlib for this purpose.
 
 Disable by setting the environment variable 'MDF_PYRO_NO_BZ2=1'
 """
-import Pyro4.core
-import Pyro4.util
 import logging
 import bz2
 import os
@@ -20,11 +18,23 @@ else:
     from StringIO import StringIO as BytesIO
 
 try:
-    _Serializer = Pyro4.util.PickleSerializer
-except AttributeError:
-    _Serializer = Pyro4.util.Serializer
+    import Pyro4
+    import Pyro4.util
+    try:
+        _Serializer = Pyro4.util.PickleSerializer
+    except AttributeError:
+        _Serializer = Pyro4.util.Serializer
+except ImportError:
+    Pyro4 = None
+
+    import pickle
+    class _Serializer(object):
+        pass
+    _Serializer.pickle = pickle
+
 
 _log = logging.getLogger(__name__)
+
 
 class MaxSizeStringIO(BytesIO):
     """raises a MemoryError when trying to write more than max size"""
@@ -49,6 +59,7 @@ class MaxSizeStringIO(BytesIO):
 
     def __exit__(self, exc_type, exc_value, traceback):
         self.close()
+
 
 class BZ2Writer(BytesIO):
     """Compresses using bz2 on the fly"""
@@ -75,6 +86,7 @@ class BZ2Writer(BytesIO):
 
     def __exit__(self, exc_type, exc_value, traceback):
         self.close()
+
 
 class BZ2Reader(object):
     """Decompress using bz2 on the fly"""
@@ -158,6 +170,7 @@ class BZ2Reader(object):
     def __exit__(self, exc_type, exc_value, traceback):
         self.__dbuf.close()
 
+
 class Serializer(_Serializer):
     """
     Subclass of the normal serializer that will switch between compressed
@@ -206,6 +219,7 @@ class Serializer(_Serializer):
 
         return self.pickle.loads(data)
 
+
 def disable_custom_pyro_serialization(enable=False):
     """
     Disables the custom pyro serialization.
@@ -213,13 +227,17 @@ def disable_custom_pyro_serialization(enable=False):
     
     Return True if previously enabled, False otherwise
     """
+    if Pyro4 is None and not enable:
+        raise Exception("Default Pyro4 serailization cannot be used as Pyro4 is not available.")
     prev_state = Serializer._is_enabled  
     Serializer._is_enabled = enable
     return prev_state
+
 
 #
 # patch Pyro4.util and Pyro.core.Proxy
 #
 if not int(os.environ.get("MDF_PYRO_NO_BZ2", 0)):
-    Pyro4.util.Serializer = Serializer
-    Pyro4.core.Proxy._pyroSerializer = Serializer()
+    if Pyro4 is not None:
+        Pyro4.util.Serializer = Serializer
+        Pyro4.core.Proxy._pyroSerializer = Serializer()

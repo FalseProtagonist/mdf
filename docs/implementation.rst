@@ -168,7 +168,7 @@ nodes.py defines the following classes:
 - :py:class:`MDFNode`
 - :py:class:`MDFVarNode`
 - :py:class:`MDFEvalNode`
-- :py:class:`MDFTimeNode`
+- :py:class:`MDFDateTimeNode`
 - :py:class:`MDFIterator`
 - :py:class:`MDFIteratorFactory`
 - :py:class:`MDFIteratorFactory`

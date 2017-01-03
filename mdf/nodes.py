@@ -10,13 +10,18 @@ import types
 import os
 import re
 from .parser import tokenize, get_assigned_node_name
-from context import MDFContext, MDFNodeBase
-from common import DIRTY_FLAGS
+from .context import MDFContext, MDFNodeBase
+from .common import DIRTY_FLAGS
+import datetime as dt
+import pandas as pa
 
-# these are cimported in nodes.pxd
-# uncomment if not compiling with Cython
-#from context import _get_current_context, _get_context, _profiling_enabled
-#from cqueue import *
+# PURE PYTHON START (cimported in nodes.pxd)
+from context import _get_current_context, _get_context, _profiling_is_enabled
+from cqueue import *
+import_datetime = lambda: None
+# PURE PYTHON END
+
+import_datetime()
 
 _logger = logging.getLogger(__name__)
 _trace_enabled = cython.declare(int, False)
@@ -24,10 +29,17 @@ _trace_enabled = cython.declare(int, False)
 DIRTY_FLAGS_NONE = DIRTY_FLAGS.NONE
 DIRTY_FLAGS_ALL  = DIRTY_FLAGS.ALL
 DIRTY_FLAGS_TIME = DIRTY_FLAGS.TIME
-DIRTY_FLAGS_ERR = DIRTY_FLAGS.ERR
+DIRTY_FLAGS_DATE = DIRTY_FLAGS.DATE
+DIRTY_FLAGS_DATETIME = DIRTY_FLAGS.DATETIME
+DIRTY_FLAGS_ERROR = DIRTY_FLAGS.ERROR
+DIRTY_FLAGS_INVALIDATE_GENERATOR = DIRTY_FLAGS.INVALIDATE_GENERATOR
+DIRTY_FLAGS_CHANGED_MASK = DIRTY_FLAGS.CHANGED_MASK
+DIRTY_FLAGS_FUTURE_DATA = DIRTY_FLAGS.FUTURE_DATA
+
 
 # MethodWrapperType is missing from types
 MethodWrapperType = type([].__delattr__)
+
 
 def enable_trace(enable=True):
     global _trace_enabled
@@ -35,6 +47,7 @@ def enable_trace(enable=True):
 
 _pickle_node = None
 _unpickle_node = None
+
 
 def _lazy_imports():
     global _pickle_node, _unpickle_node
@@ -48,8 +61,7 @@ def _get_calling_module_and_class():
     returns the first module on the call stack that's not this module
     If being called during class construction also returns the class name
     """
-    this_module = sys.modules[__name__]
-    this_package = this_module.__package__
+    ignored_packages = re.compile("^mdf(\.(?!tests)[^\.]+)*$")
     frame = sys._getframe() # frame = inspect.currentframe()
     try:
         while frame is not None:
@@ -70,7 +82,8 @@ def _get_calling_module_and_class():
                             if m_base == file_base:
                                 module = m
                                 break
-            if getattr(module, "__package__", None) != this_package:
+            package = getattr(module, "__package__", None)
+            if not package or not ignored_packages.match(package):
                 clsname = frame.f_code.co_name
                 if clsname == "<module>":
                     clsname = None
@@ -91,6 +104,7 @@ if sys.version_info[0] > 2:
 else:
     TypeType = types.TypeType
 
+
 def _isgeneratorfunction(func):
     # see inpect.isgeneratorfunction
     # reproduced here to avoid breaking out of cython when
@@ -106,6 +120,7 @@ def _isgeneratorfunction(func):
     elif isinstance(func, MDFCallable):
         return func.is_generator()
     return False
+
 
 def _is_member_of(cls, obj):
     """
@@ -124,12 +139,14 @@ def _is_member_of(cls, obj):
 
     return False
 
+
 def _get_func_name(func):
     """returns a function's name"""
     try:
         return func.func_name
     except AttributeError:
         return func.__name__
+
 
 def _get_module_name(module):
     """returns a module's name"""
@@ -140,6 +157,7 @@ def _get_module_name(module):
         return "__main__"
     return module.__name__
 
+
 class NodeState(object):
     """
     context dependent state for MDFNode instances
@@ -149,8 +167,10 @@ class NodeState(object):
         self.ctx_id = ctx_id
         self.dirty_flags = dirty_flags
         self.has_value = False
+        self.has_all_values = False
         self.date = None
         self.value = None
+        self.all_values = None
         self.alt_context = None
         self.override = None
         self.override_cache = None
@@ -206,6 +226,7 @@ class NodeState(object):
             ),
         ]) + "\n</NodeState>"
 
+
 class MDFIterator(object):
     """
     MDFIterator is used as a way of writing path-dependent evalnodes.
@@ -253,6 +274,7 @@ class MDFIterator(object):
     def next(self):
         raise NotImplementedError("next")
 
+
 class MDFIteratorFactory(object):
     """
     Callable object that returns an instance of MDFIterator.
@@ -271,6 +293,7 @@ class MDFIteratorFactory(object):
 
     def __call__(self):
         return self.iterator_class(self.node_class)
+
 
 class MDFCallable(object):
     """
@@ -309,6 +332,7 @@ class MDFCallable(object):
 
     def is_generator(self):
         return _isgeneratorfunction(self.callable)
+
 
 class ConditionalDependencyError(Exception):
     
@@ -359,6 +383,7 @@ class ConditionalDependencyError(Exception):
                         "\n".join(["  %s" % x.name for x in diff_nodes])) +
                     ("\n\nMake that dependency unconditional to fix.") +
                     ("\n\n%s" % dep_tree)))
+
 
 class MDFNode(MDFNodeBase):
     """
@@ -433,6 +458,9 @@ class MDFNode(MDFNodeBase):
                     else:
                         self._name = "%s.%s" % (self._modulename, name)
 
+        # for quicker hashing
+        self._name = intern(self._name)
+
         # dict of NodeStates per context
         self._states = {}
         MDFContext.register_node(self)
@@ -493,10 +521,68 @@ class MDFNode(MDFNodeBase):
         if isinstance(lhs, MDFNode):
             return MDFNode._commutative_binop("__truediv__", lhs, rhs)
         return (_one_node / rhs) * lhs
-    
+
+    def __or__(lhs, rhs):
+        return MDFNode._commutative_binop("__or__", lhs, rhs)
+
+    def __and__(lhs, rhs):
+        return MDFNode._commutative_binop("__and__", lhs, rhs)
+
     def __neg__(self):
         return MDFNode._op("__neg__", self)
-    
+
+    def __hash__(self):
+        return hash(self._name)
+
+    def __richcmp__(lhs, rhs, op):
+        if op == 0:  # lt
+            if isinstance(lhs, MDFNode):
+                return MDFNode._op("__lt__", lhs, rhs)
+            return rhs > lhs
+
+        if op == 1:  # le
+            if isinstance(lhs, MDFNode):
+                return MDFNode._op("__le__", lhs, rhs)
+            return rhs >= lhs
+
+        if op == 2:  # eq
+            return MDFNode._commutative_binop("__eq__", lhs, rhs)
+
+        if op == 3:  # ne
+            return MDFNode._commutative_binop("__ne__", lhs, rhs)
+
+        if op == 4:  # gt
+            if isinstance(lhs, MDFNode):
+                return MDFNode._op("__gt__", lhs, rhs)
+            return rhs < lhs
+
+        if op == 5:  # ge
+            if isinstance(lhs, MDFNode):
+                return MDFNode._op("__ge__", lhs, rhs)
+            return rhs <= lhs
+
+        raise NotImplemented("__richcmp__ called with op=%d" % op)
+
+# PURE PYTHON START
+    def __lt__(lhs, rhs):
+        return lhs.__richcmp__(rhs, 0)
+
+    def __le__(lhs, rhs):
+        return lhs.__richcmp__(rhs, 1)
+
+    def __eq__(lhs, rhs):
+        return lhs.__richcmp__(rhs, 2)
+
+    def __ne__(lhs, rhs):
+        return lhs.__richcmp__(rhs, 3)
+
+    def __gt__(lhs, rhs):
+        return lhs.__richcmp__(rhs, 4)
+
+    def __ge__(lhs, rhs):
+        return lhs.__richcmp__(rhs, 5)
+# PURE PYTHON END
+
     @staticmethod
     def _commutative_binop(op_name, lhs, rhs):
         """
@@ -772,13 +858,35 @@ class MDFNode(MDFNodeBase):
         self._short_name = ".".join([x.split(":")[0] for x in name.split(".")])
         return self._short_name
 
+    @short_name.setter
+    def short_name(self, short_name):
+        self._short_name = short_name
+
+    def label(self, short_name):
+        """
+        Sets the name and short_name on the node and returns the node.
+        """
+        name = short_name
+        if self._modulename:
+            name = "%s.%s" % (self._modulename, name)
+
+        self._name = name
+        self._short_name = short_name
+
+        # re-register the node so it can be found by name (for example, when pickling)
+        MDFContext.register_node(self)
+
+        return self
+
     @property
     def modulename(self):
         """name of the module this node was declared in"""
         return self._modulename
 
-    def has_timestep_update(self, ctx):
-        """returns True if the node value can be updated incrementally as time is updated"""
+    def has_timestep_update(self):
+        """Node should return True if it needs to be called on each timestep.
+        This is only called from the contstructor and the result is cached.
+        """
         return False
 
     def is_dirty(self, ctx, mask=DIRTY_FLAGS_ALL):
@@ -855,9 +963,18 @@ class MDFNode(MDFNodeBase):
                 node.on_set_dirty(ctx, flags)
 
             # remove any cached value as it will have to be re-calculated
-            if flags & ~DIRTY_FLAGS_TIME:
+            if flags & (DIRTY_FLAGS_CHANGED_MASK & ~DIRTY_FLAGS_DATETIME):
                 node_state.has_value = False
                 node_state.value = None
+                node_state.has_all_values = False
+                node_state.all_values = None
+
+            if flags & DIRTY_FLAGS_INVALIDATE_GENERATOR:
+                node_state.generator = None
+
+            if flags & DIRTY_FLAGS_FUTURE_DATA:
+                node_state.has_all_values = False
+                node_state.all_values = None
 
             # add this node's callers to the list to process
             for ctx_id, callers in node_state.callers.iteritems():
@@ -876,7 +993,7 @@ class MDFNode(MDFNodeBase):
     def _touch(self, node_state, flags=DIRTY_FLAGS_ALL, _quiet=False, _depth=0):
         """
         Mark this node as not dirty and all calling nodes as dirty.
-        
+
         All shifted contexts that also share this node are also touched.
 
         If _quiet is True only this node is touched (in ctx and possibly
@@ -906,6 +1023,132 @@ class MDFNode(MDFNodeBase):
                         continue
 
     # thread_id is passed in to avoid fetching it again later if this has to get another node value
+    def get_all_values(self, ctx, thread_id=None):
+        """
+        Gets all past and future values for this node, if available.
+
+        Depending on the node type this may involve calculating
+        the latest value.
+        """
+        node_state = cython.declare(NodeState)
+        node_state = self._get_state(ctx)
+
+        # inform the node if future data's changed in case it needs to update any internal state
+        if node_state.dirty_flags & DIRTY_FLAGS_FUTURE_DATA == DIRTY_FLAGS_FUTURE_DATA:
+            self._update_all_values(ctx, node_state)
+            node_state.dirty_flags &= ~DIRTY_FLAGS_FUTURE_DATA
+
+        # return the cached value if nothing except datetime has changed
+        if node_state.has_all_values \
+        and node_state.dirty_flags & ~DIRTY_FLAGS_DATETIME == DIRTY_FLAGS_NONE:
+            if _trace_enabled:
+                _logger.debug("Have cached values for %s[%s]" % (self.name, ctx))
+            return node_state.all_values
+
+        # get the alt context this node should be evaluated in (i.e. the least shifted context
+        # with all the shifts this node depends on).
+        alt_ctx = cython.declare(MDFContext)
+        new_alt_ctx = cython.declare(MDFContext)
+        alt_ctx = self.get_alt_context(ctx)
+
+        # check the alt_ctx hasn't changed if it's been reset since last time
+        if node_state.prev_alt_context is not None and node_state.prev_alt_context is not alt_ctx:
+            raise ConditionalDependencyError(self, ctx, node_state.prev_alt_context, alt_ctx)
+
+        if _trace_enabled:
+            _logger.debug("Getting all values of %s[%s]" % (self.name, ctx))
+
+        try:
+            # get the value from alt_ctx if its different from the current context
+            if alt_ctx is not ctx:
+                return alt_ctx._get_node_all_values(self, self, ctx, thread_id)
+
+            override = cython.declare(MDFNode)
+            override = self._get_override(ctx, node_state)
+            if override is not None:
+                values = ctx._get_node_all_values(override, self, ctx, thread_id)
+                self._set_all_values(ctx, node_state, values)
+                if _trace_enabled:
+                    if values is None:
+                        _logger.debug("All values of %s[%s] are not available" % (self.name, ctx))
+                    else:
+                        _logger.debug("Retrieved values of %s[%s]" % (self.name, ctx))
+                return values
+
+            # otherwise make sure any required generator is setup and get all values
+            self._setup_generator(ctx, node_state)
+
+            if _profiling_is_enabled():
+                with ctx._profile(self, "get_all_values") as timer:
+                    values = self._get_all_values(ctx, node_state)
+            else:
+                values = self._get_all_values(ctx, node_state)
+
+            self._set_all_values(ctx, node_state, values)
+
+            if _trace_enabled:
+                if values is None:
+                    _logger.debug("All values of %s[%s] are not available" % (self.name, ctx))
+                else:
+                    _logger.debug("Retrieved values of %s[%s]" % (self.name, ctx))
+
+            return values
+        except:
+            # Clear all dirty flags
+            self._touch(node_state, DIRTY_FLAGS_ALL, True)
+
+            # Set the error flag
+            self._set_dirty(node_state, DIRTY_FLAGS_ERROR, 0)
+
+            # and re-raise
+            raise
+
+        finally:
+            # If nothing's changed this is a cheap operation as the alt_context is cached
+            new_alt_ctx = self.get_alt_context(ctx)
+
+            # check the alt_context hasn't changed after getting the value
+            # on the alt_context. This could happen is a new dependency was
+            # introduced that made this node dependent on any of the shifted
+            # nodes between ctx and alt_ctx.
+            if alt_ctx is not ctx and new_alt_ctx is not alt_ctx:
+                # if this error happens often it might be worth just re-evaluating in the
+                # new alt_ctx, but that would result in wasted valuations that could be
+                # avoided in most cases I imagine.
+                raise ConditionalDependencyError(self, ctx, alt_ctx, new_alt_ctx)
+
+            # remember the alt_context for next time
+            node_state.prev_alt_context = new_alt_ctx
+
+    def _get_all_values(self, ctx, node_state):
+        """
+        Returns the set of all values (past and future) for this node for a given context.
+
+        Depending on the node type this may involve calculating
+        the set of values.
+
+        Usually returns None to indicate all values are not available (e.g. if
+        the value is calculated iteratively or depends on other nodes where all data
+        is not available).
+
+        *override in subclass*
+        """
+        return None
+
+    def _update_all_values(self, ctx, node_state):
+        """
+        Called whenever a node is evaluated and any future data has changed since the
+        last time it was evaluated.
+
+        This can be overriden by a subclass to update any internal state (e.g. if it's
+        using an iterator on some pre-calculated values).
+
+        The base class implementation clears any previously calculated values.
+        """
+        node_state.has_all_values = False
+        node_state.all_values = None
+
+    # thread_id is passed in to avoid fetching it again later if this has to get another node value
     def get_value(self, ctx, thread_id=None):
         """
         returns the value for this node for a given context.
@@ -917,10 +1160,19 @@ class MDFNode(MDFNodeBase):
         node_state = self._get_state(ctx)
 
         # return the cached value if the node isn't dirty
-        if node_state.dirty_flags == DIRTY_FLAGS_NONE:
+        if node_state.dirty_flags & DIRTY_FLAGS_CHANGED_MASK == DIRTY_FLAGS_NONE:
             if _trace_enabled:
                 _logger.debug("Have cached value for %s[%s]" % (self.name, ctx))
-            return self._get_cached_value_and_date(ctx, node_state)[0]
+
+            if not node_state.has_value:
+                raise KeyError("%s not found in %s" % (self.name, ctx))
+
+            return node_state.value
+
+        # inform the node if future data's changed in case it needs to update any internal state
+        if node_state.dirty_flags & DIRTY_FLAGS_FUTURE_DATA == DIRTY_FLAGS_FUTURE_DATA:
+            self._update_all_values(ctx, node_state)
+            node_state.dirty_flags &= ~DIRTY_FLAGS_FUTURE_DATA
 
         # get the alt context this node should be evaluated in (i.e. the least shifted context
         # with all the shifts this node depends on).
@@ -945,6 +1197,7 @@ class MDFNode(MDFNodeBase):
                 return value
 
             # otherwise call the subclass's _get_value method
+            self._setup_generator(ctx, node_state)
             value = self._get_value(ctx, node_state)
             self._set_value(ctx, node_state, value)
             return value
@@ -953,7 +1206,7 @@ class MDFNode(MDFNodeBase):
             self._touch(node_state, DIRTY_FLAGS_ALL, True)
 
             # Set the error flag
-            self._set_dirty(node_state, DIRTY_FLAGS_ERR, 0)
+            self._set_dirty(node_state, DIRTY_FLAGS_ERROR, 0)
             
             # and re-raise
             raise
@@ -990,14 +1243,14 @@ class MDFNode(MDFNodeBase):
         """
         raise NotImplementedError("_get_value")
 
-    def _get_cached_value_and_date(self, ctx, node_state):
+    def _setup_generator(self, ctx, node_state):
         """
-        returns the cached value and date for this node in a context
-        """
-        if not node_state.has_value:
-            raise KeyError("%s not found in %s" % (self.name, ctx))
+        If the node uses a generator make sure it's created
+        and set on the node state.
 
-        return node_state.value, node_state.date
+        *override in subclass*
+        """
+        raise NotImplementedError("_setup_generator")
 
     def _get_cached_value(self, ctx):
         """
@@ -1084,7 +1337,22 @@ class MDFNode(MDFNodeBase):
         node_state.value = value
 
         # touch the node to reset the flags and touch and callers
-        self._touch(node_state, DIRTY_FLAGS_ALL, _quiet)
+        self._touch(node_state, DIRTY_FLAGS_ALL & ~DIRTY_FLAGS_FUTURE_DATA, _quiet)
+
+    def _set_all_values(self, ctx, node_state, values, _quiet=True):
+        """
+        Called by get_all_value to stored the cached values.
+        """
+        # set the values
+        node_state.has_all_values = True
+        node_state.all_values = values
+
+        # touch the node to reset the flags and touch and callers
+        self._touch(node_state, DIRTY_FLAGS_FUTURE_DATA | DIRTY_FLAGS_ERROR, _quiet)
+
+    def set_all_values(self, ctx, values):
+        node_state = self._get_state(ctx)
+        return self._set_all_values(ctx, node_state, values, False)
 
     def _override_getter(self):
         ctx = _get_current_context()
@@ -1227,21 +1495,22 @@ class MDFNode(MDFNodeBase):
 
     def __call__(self):
         """set up the context and return the value for this node"""
-        if _profiling_enabled:
+        if _profiling_is_enabled():
             stop_time = time.clock()
 
         ctx_ = cython.declare(MDFContext)
         ctx_ = _get_current_context()
 
-        if _profiling_enabled:
+        if _profiling_is_enabled():
             timer = ctx_._pause_current_timer(stop_time)
 
         try:
             # always get the value via the context so any new dependencies get set up
             return ctx_._get_node_value(self)
         finally:
-            if _profiling_enabled:
+            if _profiling_is_enabled():
                 timer.resume()
+
 
 @cython.cclass 
 class NodeSetDirtyState(object):
@@ -1250,6 +1519,7 @@ class NodeSetDirtyState(object):
     node_state = cython.declare(NodeState)
     node = cython.declare(MDFNode)
     flags = cython.declare(int)
+
 
 # cfunc to create NodeSetDirtyState to avoid having to convert the args
 # into a python tuple as would happen if using __init__
@@ -1264,6 +1534,7 @@ def create_NodeSetDirtyState(depth, node_state, node, flags):
     obj.node = node
     obj.flags = flags
     return obj
+
 
 class MDFVarNode(MDFNode):
     """most basic type of node that just holds a value"""
@@ -1285,13 +1556,16 @@ class MDFVarNode(MDFNode):
         return "varnode"
 
     def _get_value(self, ctx, node_state):
-        try:
-            return self._get_cached_value_and_date(ctx, node_state)[0]
-        except KeyError:
-            if self._default_value is self._no_default_value_:
-                raise
+        if node_state.has_value:
+            return node_state.value
+
+        if self._default_value is self._no_default_value_:
+            raise ValueError("varnode '%s' has no value" % self.name)
 
         return self._default_value
+
+    def _setup_generator(self, ctx, node_state):
+        return
 
     def _get_alt_context(self, ctx):
         """
@@ -1307,6 +1581,16 @@ class MDFVarNode(MDFNode):
         parent = cython.declare(MDFContext)
         parent = ctx.get_parent() or ctx
         return parent.shift(shift_set)
+
+    def _get_all_values(self, ctx, node_state):
+        """
+        varnodes don't vary over time, so getting all values for a timespan is trivial.
+        """
+        index = ctx._get_node_all_values(_now_node, calling_node=self)
+        if index is not None:
+            value = self._get_value(ctx, node_state)
+            return pa.Series(value, index=index)
+
 
 def varnode(name=None, default=MDFVarNode._no_default_value_, category=None):
     """
@@ -1329,6 +1613,7 @@ def varnode(name=None, default=MDFVarNode._no_default_value_, category=None):
         name = get_assigned_node_name("varnode", 0 if cython.compiled else 1)
     return MDFVarNode(name, default, category=category)
 
+
 class _VarGroupMeta(type):
     """
     Metaclass for constructing vargroups. At the moment, the main purpose
@@ -1345,6 +1630,7 @@ class _VarGroupMeta(type):
 
     def __repr__(self):
         return "<%s, %s>" % (self._group_name or "vargroup", self._dict)
+
 
 def vargroup(group_name=None, **kwargs):
     """
@@ -1368,6 +1654,7 @@ def vargroup(group_name=None, **kwargs):
     cls_name = "%s__%s" % (group_name, str(uuid.uuid4()))
     return _VarGroupMeta(cls_name, bases=(object,), dict=attribs, group_name=group_name)
 
+
 class MDFEvalNode(MDFNode):
 
     _staticmethod_counter = itertools.count()
@@ -1380,8 +1667,8 @@ class MDFEvalNode(MDFNode):
         if name is None:
             name = self._get_func_name(func)
         MDFNode.__init__(self, name=name, short_name=short_name, fqname=fqname, cls=cls, category=category)
-        self._has_timestep_update = self._is_generator
-        
+        self._has_timestep_update = self.has_timestep_update()
+
         # get func_doc first then __doc__ to allow instances (iterators etc) to set their own docstring
         self.func_doc = getattr(func, "func_doc", None)
         if self.func_doc is None:
@@ -1411,36 +1698,56 @@ class MDFEvalNode(MDFNode):
         sets the function for this evalnode - only to be used by sub-classes
         that need to re-set the function after construction.
         """
+        if self._func is func:
+            return
+
         self._func = func
         self._is_generator = _isgeneratorfunction(self._func)
+        self._has_timestep_update = self.has_timestep_update()
 
         # update the docstring
         self.func_doc = getattr(func, "func_doc", None)
         if self.func_doc is None:
             self.func_doc = getattr(func, "__doc__", None)
 
-    def _bind(self, other, owner):
+    def _get_bind_kwargs(self, owner):
+        filter_func = self._filter_func
+        if isinstance(filter_func, (types.FunctionType, MDFEvalNode)) \
+        and _is_member_of(self, filter_func):
+            if isinstance(filter_func, MDFEvalNode):
+                filter_func = filter_func.__get__(None, owner)
+            else:
+                filter_func = self._bind_function(filter_func, owner)
+
+        return {
+            "func": self._bind_function(self._func, owner),
+            "name": self.name.split(".")[-1],
+            "filter": filter_func,
+            "category": self.categories
+        }
+
+    def _bind(self, owner, base_cls):
         """
         bind is called when the node is 'got' for a class instance.
-        A new node is created, and this is called on the new node
-        with the original node and the owning class to which this
-        new node is to be bound.
+        This effectively clones 'self' and binds the copy to the owner.
         """
-        if isinstance(other._filter_func, (types.FunctionType, MDFEvalNode)) and _is_member_of(owner, other._filter_func):
-            if isinstance(other._filter_func, MDFEvalNode):
-                self._filter_func = other._filter_func.__get__(None, owner)
-            else:
-                self._filter_func = self._bind_function(other._filter_func, owner)
-        else:
-            self._filter_func = other._filter_func
+        # create the clone
+        kwargs = self._get_bind_kwargs(owner)
+        func = kwargs.pop("func")
+        clone = self.__class__(func, cls=(owner, base_cls), **kwargs)
 
         # set the docstring for the bound node to the same as the unbound one
-        self.func_doc = other.func_doc
+        self.func_doc = clone.func_doc
+
+        return clone
 
     def _bind_function(self, func, owner):
         """convenience method for binding a function to an owner"""
         if owner is None:
             return func
+
+        if isinstance(func, MDFEvalNode):
+            return func.__get__(None, owner)
 
         if isinstance(func, types.FunctionType):
             if func.__code__.co_argcount == 0:
@@ -1463,7 +1770,7 @@ class MDFEvalNode(MDFNode):
         if isinstance(func, types.TypeType) and issubclass(func, MDFIterator):
             return MDFIteratorFactory(func, owner)
 
-        raise Exception("MDFEvalNode._bind_function called with unexpected type %s" % type(func))
+        return func
 
     # MDFEvalNode is also a descriptor and can be bound to classes
     # to produce new nodes with the target function bound to the class
@@ -1483,16 +1790,12 @@ class MDFEvalNode(MDFNode):
             for cls in owner.mro():
                 # this slightly cumbersome check is to avoid testing equality with any objects
                 # that don't return bools when compared (eg pandas Series and DataFrames)
-                if self in [x for x in cls.__dict__.values() if isinstance(x, self.__class__)]:
+                if id(self) in [id(x) for x in cls.__dict__.values() if isinstance(x, self.__class__)]:
                     base_cls = cls
                     break
 
-            # get the bound function
-            func = self._bind_function(self._func, owner)
-
             # create the new node and bind it to the owner
-            node = self.__class__(func, name=self.func_name, cls=(owner, base_cls), category=self.categories)
-            node._bind(self, owner)
+            node = self._bind(owner, base_cls)
 
             # cache it for next time
             self._bound_nodes[owner] = node
@@ -1513,98 +1816,108 @@ class MDFEvalNode(MDFNode):
     def get_filter(self):
         return self._filter_func
 
-    def has_timestep_update(self, ctx):
-        """returns True if the node value can be updated incrementally as time is updated"""
+    def has_timestep_update(self):
+        """Node should return True if it needs to be called on each timestep.
+        This is only called from the contstructor and the result is cached.
+        """
         return self._is_generator
+
+    def _setup_generator(self, ctx, node_state):
+        # if a generator isn't needed or already exists return
+        if not (self._is_generator and node_state.generator is None):
+            return
+
+        # create the generator and set it on the node state
+        if _profiling_is_enabled():
+            with ctx._profile(self, "setup_generator") as timer:
+                node_state.generator = self._func()
+        else:
+            node_state.generator = self._func()
 
     def _get_value(self, ctx, node_state):
         # if there's a timestep func and nothing's changed apart from the
         # date look for a previous value and call the timestep func
         dirty_flags = node_state.dirty_flags
         if self._is_generator \
-        and dirty_flags == DIRTY_FLAGS_TIME \
-        and node_state.generator is not None: 
-            # if this node has been valued already for this context
-            # check the date and see if it can be updated from that
-            try:
-                # don't unpack as a tuple as the produces slighly more complicated cython code
-                tmp = self._get_cached_value_and_date(ctx, node_state)
-                prev_value = tmp[0]
-                prev_date = tmp[1]
-            except KeyError:
-                prev_value, prev_date = None, None
-
-            if prev_date is not None:
-                date_cmp = cython.declare(int)
-                date_cmp = 0 if prev_date == ctx._now else (-1 if prev_date < ctx._now else 1)
-                if date_cmp == 0: # prev_date == ctx._now
-                    self._touch(node_state, DIRTY_FLAGS_ALL, True)
-                    return prev_value
-
-                if date_cmp < 0: # prev_date < ctx._now
-                    # if a filter's set check if the previous value can be re-used
-                    if self._filter_func is not None:
-                        if _profiling_enabled:
-                            with ctx._profile(self) as timer:
-                                needs_update = self._filter_func()
-                        else:
-                            needs_update = self._filter_func()
-
-                        if not needs_update:
-                            # re-use the previous value
-                            if _trace_enabled:
-                                _logger.debug("Re-using previous value of %s[%s]" % (self.name, ctx))
-
-                            self._touch(node_state, DIRTY_FLAGS_ALL, True)
-                            return prev_value
-
-                    # call the timestep function with or without the context
-                    if _trace_enabled:
-                        _logger.debug("Evaluating next value of %s[%s]" % (self.name, ctx))
-
-                    if _profiling_enabled:
-                        with ctx._profile(self):
-                            new_value = next(node_state.generator)
-                    else:
-                        new_value = next(node_state.generator)
-
-                    return new_value
-
-        # if still dirty call func to get the new value
-        if _trace_enabled:
-            _logger.debug("Evaluating %s[%s] (%s)" % (self.name,
-                                                      ctx,
-                                                      DIRTY_FLAGS.to_string(dirty_flags)))
-
-        # call the function, set the value and return it
-        if _profiling_enabled:
-            with ctx._profile(self) as timer:
-                value = self._func()
-        else:
-            value = self._func()
-
-        if self._is_generator:
-            gen = value
-
-            # evaluate the generator
-            if _profiling_enabled:
-                with ctx._profile(self) as timer:
-                    value = next(gen)
-            else:
-                value = next(gen)
-
-            node_state.generator = iter(gen)
-
-            # if a filter's set call it just to make sure any dependencies it requires
-            # are set up correctly to avoid conditional dependency errors later
+        and (dirty_flags & ~DIRTY_FLAGS_INVALIDATE_GENERATOR) == dirty_flags \
+        and node_state.generator is not None \
+        and node_state.has_value:
+            # if a filter's set check if the previous value can be re-used
             if self._filter_func is not None:
-                if _profiling_enabled:
-                    with ctx._profile(self) as timer:
-                        self._filter_func()
+                if _profiling_is_enabled():
+                    with ctx._profile(self, "get_filter") as timer:
+                        needs_update = self._filter_func()
                 else:
-                    self._filter_func()
+                    needs_update = self._filter_func()
 
-        return value
+                if not needs_update:
+                    # re-use the previous value
+                    if _trace_enabled:
+                        _logger.debug("Re-using previous value of %s[%s]" % (self.name, ctx))
+
+                    self._touch(node_state, DIRTY_FLAGS_ALL, True)
+                    return node_state.value
+
+            # call the timestep function with or without the context
+            if _trace_enabled:
+                _logger.debug("Evaluating next value of %s[%s]" % (self.name, ctx))
+
+            if _profiling_is_enabled():
+                with ctx._profile(self, "next_value"):
+                    new_value = next(node_state.generator)
+            else:
+                new_value = next(node_state.generator)
+
+            return new_value
+
+        # If a filter's set call it, and if the current value should be filtered return the previous value.
+        prev_value_found = cython.declare(cython.bint, False)
+        prev_value = cython.declare(object, None)
+        use_filtered_value = cython.declare(cython.bint, False)
+        filtered_value = cython.declare(object)
+        if not self._is_generator and self._filter_func is not None:
+            if _profiling_is_enabled():
+                with ctx._profile(self, "get_value") as timer:
+                    needs_update = self._filter_func()
+            else:
+                needs_update = self._filter_func()
+
+            if not needs_update:
+                # if this node has been valued already for this context
+                # check the date and see if it can be updated from that
+                if node_state.has_value:
+                    prev_value = node_state.value
+                    prev_value_found = True
+
+                # re-use the previous value
+                if _trace_enabled:
+                    _logger.debug("Re-using previous value of %s[%s]" % (self.name, ctx))
+
+                self._touch(node_state, DIRTY_FLAGS_ALL & ~DIRTY_FLAGS_FUTURE_DATA, True)
+                filtered_value = prev_value
+                use_filtered_value = True
+
+        # call the function if the node isn't filtered or if there's no previous value (so the
+        # dependencies and, possibly, generator are set up at the start).
+        if not use_filtered_value or not prev_value_found:
+            if _trace_enabled:
+                _logger.debug("Evaluating %s[%s] (%s)" % (self.name,
+                                                          ctx,
+                                                          DIRTY_FLAGS.to_string(dirty_flags)))
+            if self._is_generator:
+                if _profiling_is_enabled():
+                    with ctx._profile(self, "get_value") as timer:
+                        value = next(node_state.generator)
+                else:
+                    value = next(node_state.generator)
+            else:
+                if _profiling_is_enabled():
+                    with ctx._profile(self, "get_value") as timer:
+                        value = self._func()
+                else:
+                    value = self._func()
+
+        return filtered_value if use_filtered_value else value
 
     def _get_alt_context(self, ctx):
         """
@@ -1741,7 +2054,7 @@ class MDFEvalNode(MDFNode):
 
             # add an explicit dependnecy on now if incrementally updated
             if self._has_timestep_update:
-                now_ = cython.declare(MDFTimeNode)
+                now_ = cython.declare(MDFDateTimeNode)
                 now_ = now
                 self.add_dependency(ctx, now_, now_.get_alt_context(ctx))
 
@@ -1764,6 +2077,7 @@ class MDFEvalNode(MDFNode):
 
         # set the value
         MDFNode.set_value(self, ctx, value)
+
 
 # for using decorator syntax to delclare eval nodes
 def evalnode(func=None, filter=None, category=None):
@@ -1812,30 +2126,44 @@ def evalnode(func=None, filter=None, category=None):
     On subsequent evaluations, the incrementation step will be also
     executed and the node will produce the updated value.
 
-    **filter** may be used in the case when *func* is a generator to prevent
-    the node valuation being advanced on every timestep. If supplied, it
-    should be a function or node that returns True if the node should
-    be advanced for the current timestep or False otherwise.
+    **filter** may be used to prevent the node valuation being performed
+    when certain conditions are True. If supplied, it should be a function
+    or node that returns True if the node should be evaluated, if dirty,
+    or False otherwise (in which case the previous value will be used).
     """
     if func:
         return MDFEvalNode(func, category=category, filter=filter)
     return lambda x: evalnode(x, filter, category)
 
-class MDFTimeNode(MDFVarNode):
+
+class MDFDateTimeNode(MDFVarNode):
 
     def __init__(self, name=None, cls=None, fqname=None, modulename=None):
         MDFVarNode.__init__(self, name, cls=cls, fqname=fqname)
         if modulename is not None:
             self._modulename = modulename
+        self.date_node = MDFDateNode(self, cls=cls)
 
     @property
     def node_type(self):
         """returns the name of the node type of this node"""
         return "now"
 
+    @property
+    def date(self):
+        """returns a node that evaluates to the date part of this node"""
+        return self.date_node
+
+    def _get_all_values(self, ctx, node_state):
+        # The cached value is set in the context during 'run'.
+        # If this gets called it means now's been evaluated outside of a
+        # call to 'run' and so shouldn't return a series.
+        return None
+
     def _touch(self, node_state, flags=DIRTY_FLAGS_ALL, _quiet=False, _depth=0):
-        # only set the TIME flag on dependent nodes
-        MDFVarNode._touch(self, node_state, flags & DIRTY_FLAGS_TIME, _quiet, _depth)
+        # only set the DATETIME and FUTURE_DATA flags on dependent nodes
+        MDFVarNode._touch(self, node_state, flags & (DIRTY_FLAGS_DATETIME | DIRTY_FLAGS_FUTURE_DATA), _quiet, _depth)
+
         # but clear all flags on this node
         node_state.dirty_flags &= ~flags
 
@@ -1846,8 +2174,43 @@ class MDFTimeNode(MDFVarNode):
 
         return MDFVarNode.set_value(self, ctx, value)
 
+
+class MDFDateNode(MDFVarNode):
+
+    # Don't mark this node as dirty when 'now' updates.
+    # Instead the date is advanced explicitly in MDFContext._set_date.
+    dirty_flags_propagate_mask = ~DIRTY_FLAGS.DATETIME
+
+    def __init__(self, owner, cls=None):
+        self.owner = owner
+        fqname = self.owner.name + "(date)"
+        MDFVarNode.__init__(self, fqname, cls=cls, fqname=fqname)
+        self._modulename = self.owner._modulename
+
+    @property
+    def node_type(self):
+        """returns the name of the node type of this node"""
+        return "now(date)"
+
+    def _get_value(self, ctx, node_state):
+        return ctx._get_node_value(self.owner, self).date()
+
+    def _get_all_values(self, ctx, node_state):
+        """return just the date parts of the current datetimes"""
+        datetimes = ctx._get_node_all_values(self.owner)
+        if datetimes is not None:
+            return pa.Series(datetimes.index.date, index=datetimes.index)
+
+    def _touch(self, node_state, flags=DIRTY_FLAGS_ALL, _quiet=False, _depth=0):
+        # only set the DATE and FUTURE_DATA flags on dependent nodes
+        MDFVarNode._touch(self, node_state, flags & (DIRTY_FLAGS_DATE | DIRTY_FLAGS_FUTURE_DATA), _quiet, _depth)
+
+        # but clear all flags on this node
+        node_state.dirty_flags &= ~flags
+
+
 # there's one global 'now' node that gets the value of 'now' for each context
-_now_node = MDFTimeNode(fqname="now", modulename="mdf")
+_now_node = MDFDateTimeNode(fqname="now", modulename="mdf")
 now = _now_node
 
 # Used to implement the reversed division binary operator

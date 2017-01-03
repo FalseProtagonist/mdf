@@ -135,7 +135,7 @@ Below is some example code using *mdf* that does the same as the code above.
 Don't worry that some terms referenced in this code have not been mentioned
 yet, this is just to give an idea of how this code can be written::
 
-    from mdf import MDFContext, varnode, evalnode,
+    from mdf import MDFContext, varnode, evalnode
 
     # varnode creates nodes that have values in a context
     x = varnode()

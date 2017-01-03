@@ -192,7 +192,7 @@ class MDFMagics(Magics):
         or: %mdf_timestep WEEKDAY
         """
         if parameter_s:
-            self.__timestep = datetools.getOffset(parameter_s)
+            self.__timestep = datetools.to_offset(parameter_s)
         return self.__timestep
 
     @line_magic

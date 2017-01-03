@@ -27,7 +27,7 @@ Here's a quick example
 
 ::
 
-    from mdf import MDFContext, evalnode, now
+    from mdf import MDFContext, evalnode, varnode, now
     from datetime import datetime
 
     start_date = varnode()
@@ -52,7 +52,7 @@ Here's a quick example
 
     # the node days_since_start has a different value in ctx1 and ctx2
     days1 = ctx1[days_since_start] # = 15195
-    days2 = ctx1[days_since_start] # = 4238
+    days2 = ctx2[days_since_start] # = 4238
 
 Setting Values
 --------------

@@ -1,8 +1,11 @@
 *.pyc
 *.pyd
 *.c
+*.so
 *.h
 .idea
 *.ipynb
 build
 mdf.egg-info
+.cache
+*.cython.py

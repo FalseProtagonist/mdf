@@ -5,36 +5,53 @@ from datetime import datetime
 import cython
 import warnings
 import sys
+import pandas as pa
 from .common import DIRTY_FLAGS
 from . import io
 
-# this is usually cimported in context.pxd
-# uncomment if not compiling with Cython
-#from cqueue import *
-#import thread
-#PyThread_get_thread_ident = thread.get_ident
+# PURE PYTHON START (cimported in context.pxd)
+from .cqueue import *
+import thread
+PyThread_get_thread_ident = thread.get_ident
+import_datetime = lambda: None
+# PURE PYTHON END
+
+import_datetime()
 
 DIRTY_FLAGS_NONE = cython.declare(int, DIRTY_FLAGS.NONE)
 DIRTY_FLAGS_ALL  = cython.declare(int, DIRTY_FLAGS.ALL)
 DIRTY_FLAGS_TIME = cython.declare(int, DIRTY_FLAGS.TIME)
+DIRTY_FLAGS_DATE = cython.declare(int, DIRTY_FLAGS.DATE)
+DIRTY_FLAGS_DATETIME = cython.declare(int, DIRTY_FLAGS.DATETIME)
+DIRTY_FLAGS_FUTURE_DATA = cython.declare(int, DIRTY_FLAGS.FUTURE_DATA)
+
 
 _python_version = cython.declare(int, sys.version_info[0])
 
 # imported when MDFContext is constructed
 MDFNode = None
 _now_node = None
+_now_date_node = None
 _pickle_context = None
 _unpickle_context = None
 _pickle_shift_set = None
 _unpickle_shift_set = None
 
-_profiling_enabled = cython.declare(int, False)
+# PURE PYTHON START (inlined in context.pxd)
+_profiling_enabled = False
+
+def _profiling_is_enabled():
+    return _profiling_enabled
+# PURE PYTHON END
+
 def enable_profiling(enable=True):
     global _profiling_enabled
     _profiling_enabled = enable
 
-def _profiling_is_enabled():
+
+def profiling_is_enabled():
     return _profiling_enabled
+
 
 _allow_duplicate_nodes = cython.declare(int, False)
 def allow_duplicate_nodes(enable=True):
@@ -89,7 +106,10 @@ class MDFNodeBase(object):
 
     def get_value(self, ctx, thread_id=None):
         raise NotImplementedError()
-        
+
+    def get_all_values(self, ctx, thread_id=None):
+        raise NotImplementedError()
+
     def has_value(self, ctx):
         raise NotImplementedError()
         
@@ -105,16 +125,20 @@ class MDFNodeBase(object):
     def set_value(self, ctx, value):
         raise NotImplementedError()
 
+    def set_all_values(self, ctx, values):
+        raise NotImplementedError()
+
     def set_override(self, ctx, override_node):
         raise NotImplementedError()
 
 def _lazy_imports():
     # import MDFNode after this module has been imported
     # to avoid circular import dependencies
-    global MDFNode, _now_node
+    global MDFNode, _now_node, _now_date_node
     import nodes
     MDFNode = nodes.MDFNode
     _now_node = nodes._now_node
+    _now_date_node = nodes._now_node.date
 
     global _pickle_context, _unpickle_context
     import ctx_pickle
@@ -124,6 +148,7 @@ def _lazy_imports():
     global _pickle_shift_set, _unpickle_shift_set
     _pickle_shift_set = ctx_pickle._pickle_shift_set
     _unpickle_shift_set = ctx_pickle._unpickle_shift_set
+
 
 class Timer(object):
     """object for collecting metrics about nodes and builders"""
@@ -151,17 +176,20 @@ class Timer(object):
         self.total_time += stop_time - self.started_time
         self.is_running = False
 
+
 class NodeOrBuilderTimer(object):
     """object with with semantics for timing a node or builder"""
-    def __init__(self, ctx, node_or_builder):
+    def __init__(self, ctx, node_or_builder, operation):
         self.ctx = ctx
         self.node_or_builder = node_or_builder
+        self.operation = operation
 
     def __enter__(self):
-        return self.ctx._start_timer(self.node_or_builder)
+        return self.ctx._start_timer(self.node_or_builder, self.operation)
 
     def __exit__(self, exc_type, exc_value, traceback):
         self.ctx._stop_timer()
+
 
 class NullTimer:
     """used in place of NodeOrBuilderTimer when profiling isn't enabled"""
@@ -170,6 +198,7 @@ class NullTimer:
 
     def __exit__(self, exc_type, exc_value, traceback):
         pass
+
 
 # use a single instance of the null timer to avoid cost of construction
 _null_timer = NullTimer()
@@ -645,6 +674,10 @@ class MDFContext(object):
         # remember the date before it's changed
         prev_date = self._now
 
+        # if the time's been reset then everything needs to be reset
+        reset_all = cython.declare(cython.bint)
+        reset_all = date < prev_date
+
         # don't allow the date to be changed on a shifted context as it will
         # potentially update values in the context below
         if self._shift_set and _now_node not in self._shift_set:
@@ -711,6 +744,15 @@ class MDFContext(object):
         # trim any unused slots
         all_contexts = all_contexts[:num_contexts]
 
+        flags = cython.declare(int)
+        flags = DIRTY_FLAGS_TIME
+
+        if date.toordinal() != prev_date.toordinal():
+            flags |= DIRTY_FLAGS_DATE
+
+        if reset_all:
+            flags |= DIRTY_FLAGS_ALL
+
         # call the 'on_set_date' callback on any nodes needing it before
         # actually setting the date on the context.
         # If on_set_date returns True that indicates the node will become dirty
@@ -730,8 +772,8 @@ class MDFContext(object):
                     for node in ctx._nodes_requiring_set_date_callback.keys():
                         cqueue_push(ctx._node_eval_stack, node)
                         try:
-                            with ctx._profile(node) as timer:
-                                dirty = node.on_set_date(ctx, date)
+                            with ctx._profile(node, "on_set_date") as timer:
+                                dirty = node.on_set_date(ctx, date, flags)
                             if dirty:
                                 on_set_date_dirty.append((node, ctx))
                                 on_set_date_dirty_count += 1
@@ -749,20 +791,25 @@ class MDFContext(object):
             # mark any incrementally updated nodes as dirty
             if ctx._has_incrementally_updated_nodes:
                 for node in ctx._incrementally_updated_nodes.iterkeys():
-                    node.set_dirty(ctx, DIRTY_FLAGS_TIME)
+                    node.set_dirty(ctx, flags)
 
         # mark any nodes that indicated they would become dirty after calling 'on_set_date'
         if on_set_date_dirty_count > 0:
             for node, ctx in on_set_date_dirty:
-                node.set_dirty(ctx, DIRTY_FLAGS_TIME)
+                node.set_dirty(ctx, flags)
 
         # set the now node value in the least shifted context
         # (anything dependent on now will be dependent on
         # it in this context so no need to touch it in the shifted contexts)
         alt_ctx = _now_node.get_alt_context(self)
-        alt_ctx.set_value(_now_node, date)
+        if reset_all:
+            _now_node.set_dirty(alt_ctx, flags)
 
-        if date < prev_date:
+        alt_ctx.set_value(_now_node, date)
+        if flags & DIRTY_FLAGS_DATE != DIRTY_FLAGS_NONE:
+            alt_ctx.set_value(_now_node.date, date.date())
+
+        if reset_all:
             # if setting the date to a date in the past clear any incrementally
             # updated nodes so they'll start from their initial values again
             for ctx in all_contexts:
@@ -813,6 +860,40 @@ class MDFContext(object):
         cookie = self._activate()
         try:
             self._set_date(date)
+        finally:
+            self._deactivate(cookie)
+
+    def _set_date_range(self, date_range):
+        """
+        Set the date range of all possible values of now.
+        """
+        cookie = self._activate()
+        try:
+            # 'all_values' is a series of values indexed by 'now'
+            date_range = pa.Series(date_range, index=date_range)
+
+            alt_ctx = _now_node.get_alt_context(self)
+            _now_node.set_all_values(alt_ctx, date_range)
+        finally:
+            self._deactivate(cookie)
+
+    def _extend_date_range(self, date_range):
+        """
+        Extend the date range of all possible values of now.
+        """
+        cookie = self._activate()
+        try:
+            # 'all_values' is a series of values indexed by 'now'
+            date_range = pa.Series(date_range, index=date_range)
+            alt_ctx = _now_node.get_alt_context(self)
+
+            current_values = alt_ctx._get_all_values(_now_node)
+            if current_values is not None:
+                assert current_values[-1] < date_range[0], \
+                    "Can't extend date range with dates before the current range."
+                date_range = current_values.append(date_range)
+
+            _now_node.set_all_values(alt_ctx, date_range)
         finally:
             self._deactivate(cookie)
 
@@ -899,6 +980,66 @@ class MDFContext(object):
             if _profiling_enabled and timer is not None:
                 timer.resume()
 
+    def _get_node_all_values(self, node, calling_node=None, prev_ctx=None, thread_id=None):
+        alt_ctx = cython.declare(MDFContext)
+
+        # activate the context
+        cookie = self._activate(prev_ctx, thread_id)
+        prev_ctx = cookie.prev_context
+
+        # if we're in the middle of a node evaluation get
+        # the last node on the eval stack
+        if calling_node is None:
+            calling_node = self._get_calling_node(prev_ctx)
+
+        try:
+            # push this node on the stack and get its value (which we don't use, it's just
+            # to make sure it's been calculated)
+            cqueue_push(self._node_eval_stack, node)
+            try:
+                return node.get_all_values(self, thread_id)
+            finally:
+                cqueue_pop(self._node_eval_stack)
+
+                # get the context this valuation actually corresponds to
+                # (this could be something other than self if self is
+                #  shifted and this node doesn't depend on the shift)
+                alt_ctx = node.get_alt_context(self)
+
+                # add this node to the calling node's dependencies in the alt context
+                if calling_node is not None:
+                    calling_node._add_dependency(prev_ctx, node, alt_ctx)
+
+                # Getting all data for a node *doesn't* cause the node to be updated incrementally
+                # or receive the on date callback.
+                # If it's been able to pre-calculate all future values and all references to it can
+                # use those values then there's no need.
+        finally:
+            # deactivate the context
+            self._deactivate(cookie)
+
+    def _get_all_values(self, node):
+        """
+        Return all past and future values for a node, if supported by the node type.
+        This isn't available in user code, only in cythoned code such as nodetypes.
+        """
+        if _profiling_enabled:
+            stop_time = time.clock()
+            ctx = cython.declare(MDFContext)
+            ctx = self._parent or self
+            timer = cython.declare(Timer)
+            timer = None
+            if len(ctx._timer_stack) > 0:
+                timer = ctx._pause_current_timer(stop_time)
+
+        assert isinstance(node, MDFNode), "Attempted to get all values of a non-node object"
+
+        try:
+            return self._get_node_all_values(node)
+        finally:
+            if _profiling_enabled and timer is not None:
+                timer.resume()
+
     def set_value(self, node, value):
         """        
         Sets a value of a node in the context.
@@ -909,7 +1050,7 @@ class MDFContext(object):
             # node if the context is shifted by now
             if self._finalized \
             and self._shift_set \
-            and not (node is _now_node and node in self._shift_set):
+            and not ((node is _now_node or node is _now_date_node) and _now_node in self._shift_set):
                 raise AttributeError("Shifted contexts are read-only")
 
             # unwrap if necessary
@@ -971,16 +1112,16 @@ class MDFContext(object):
 
         return None
 
-    def _start_timer(self, node_or_builder):
+    def _start_timer(self, node_or_builder, operation):
         """starts the timer for a node and makes that timer the current one"""
         # there's one timer stack on the parent ctx, but each
         # ctx has its own set of timers.
         ctx = self._parent or self
         timer = cython.declare(Timer)
-        timer = self._timers.get(node_or_builder)
+        timer = self._timers.setdefault(node_or_builder, {}).get(operation)
         if timer is None:
             timer = Timer(node_or_builder)
-            self._timers[node_or_builder] = timer
+            self._timers[node_or_builder][operation] = timer
         ctx._timer_stack.append(timer)
         timer.start()
         return timer
@@ -998,25 +1139,29 @@ class MDFContext(object):
         """stops the current timer and returns it, call timer.resume to resume"""
         stop_time = stop_time or time.clock()
         ctx = self._parent or self
+        if len(ctx._timer_stack) == 0:
+            return Timer(None)
+
         timer = cython.declare(Timer)
         timer = ctx._timer_stack[-1]
         if timer.is_running:
             timer.stop(stop_time)
+
         return timer
 
-    def _profile(self, node):
+    def _profile(self, node, operation):
         """
         returns an object using with semantics for timing a node evaluation.
         This is called from node sub-classes to indicate the node is doing work.
         """
         if _profiling_enabled:
-            return NodeOrBuilderTimer(self, node)
+            return NodeOrBuilderTimer(self, node, operation)
         return _null_timer
 
     def _profile_builder(self, builder):
         """used by mdf.run"""
         if _profiling_enabled:
-            return NodeOrBuilderTimer(self, builder)
+            return NodeOrBuilderTimer(self, builder, "building")
         return _null_timer
 
     def all_nodes(self):
@@ -1117,38 +1262,75 @@ class MDFContext(object):
                     nodes_with_value.add(node)
                     nodes_without_value.remove(node)
 
-            for obj, timer in ctx._timers.iteritems():
-                if isinstance(obj, MDFNodeBase):
-                    name = obj.name
-                elif hasattr(obj, "__name__"):
-                    name = "<%s 0x%x>" % (obj.__name__, id(obj))
-                elif hasattr(obj, "__class__"):
-                    name = "<%s 0x%x>" % (obj.__class__.__name__, id(obj))
-                else:
-                    name = str(obj)
+            for obj, ops_to_timers in ctx._timers.items():
+                for op, timer in ops_to_timers.items():
+                    if isinstance(obj, MDFNodeBase):
+                        name = obj.name
+                    elif hasattr(obj, "__name__"):
+                        name = "<%s 0x%x>" % (obj.__name__, id(obj))
+                    elif hasattr(obj, "__class__"):
+                        name = "<%s 0x%x>" % (obj.__class__.__name__, id(obj))
+                    else:
+                        name = str(obj)
 
-                all_timers.setdefault(name, []).append(timer)
+                    all_timers.setdefault(name, {}).setdefault(op, []).append(timer)
 
         def timers_total_time(x):
-            _, timers = x
-            return sum([t.total_time for t in timers])
+            name, ops_to_timers = x
+            total_time = 0.0
+            for op, timers in ops_to_timers.items():
+                total_time += sum([t.total_time for t in timers])
+            return total_time
 
         all_timers = all_timers.items()
         all_timers.sort(key=timers_total_time)
 
         total_time = 0.0
-        for name, timers in all_timers:
-            node_num_calls = sum([t.num_calls for t in timers])
-            node_total_time = sum([t.total_time for t in timers])
-            print name
-            print "    Num Calls: %d" % node_num_calls
-            print "    Total Time: %f" % node_total_time
-            print
+        for name, timers_per_operation in all_timers:
+            print(name)
+            node_total_time = 0.0
+            for operation, timers in sorted(timers_per_operation.items()):
+                op_num_calls = sum([t.num_calls for t in timers])
+                op_total_time = sum([t.total_time for t in timers])
+                print("    %s num calls: %d" % (operation, op_num_calls))
+                print("    %s time: %f" % (operation, op_total_time))
+                node_total_time += op_total_time
+            print("    Total Time: %f" % node_total_time)
+            print("")
             total_time += node_total_time
 
         print "Number of nodes: %s" % len(nodes_with_value)
         print "Number of shifted contexts: %s" % num_shifts
         print "Total Time: %f" % total_time
+
+    def get_node_stats(self, node):
+        """retrieve statistics for a single node"""
+        if not _profiling_enabled:
+            print ("*** MDF profiling not enabled ***\n" +
+                   "Use the --mdf-profile command line option " +
+                   "to enable profiling")
+            return
+
+        results = {
+            "num_contexts": 0,
+            "total_time": 0.0
+        }
+
+        ctx = cython.declare(MDFContext)
+        for ctx in itertools.chain([self], self.get_shifted_contexts()):
+            if not node.has_value(ctx):
+                continue
+
+            results["num_contexts"] += 1
+            for op, timer in ctx._timers.get(node, {}).items():
+                result = results.setdefault(op, {
+                    "num_calls": 0,
+                    "total_time": 0.0
+                })
+                result["num_calls"] += timer.num_calls
+                result["total_time"] += timer.total_time
+
+        return results
 
     def to_dot(self,
                filename=None,

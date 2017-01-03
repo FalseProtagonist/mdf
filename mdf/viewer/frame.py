@@ -12,14 +12,23 @@ import sys
 import logging
 import pandas as pd
 import numpy as np
-import matplotlib.pyplot
 from datetime import datetime, timedelta
 from collections import deque
 from ..runner import run
 from ..builders import DataFrameBuilder
 from ..nodes import MDFVarNode
-import excel
 import traceback
+
+try:
+    import matplotlib.pyplot
+    _matplotlib_imported = True
+except (ImportError, RuntimeError):
+    _matplotlib_imported = False
+
+try:
+    import excel
+except ImportError:
+    excel = None
 
 _logger = logging.getLogger(__name__)
 
@@ -45,10 +54,14 @@ _default_pycrust_locals = {
     "pa"                : pd,
     "pandas"            : pd,
     "np"                : np,
-    "numpy"             : np,
-    "pyplot"            : matplotlib.pyplot,
-    "export_dataframe"  : excel.export_dataframe,
+    "numpy"             : np
 }
+
+if _matplotlib_imported:
+    _default_pycrust_locals["pyplot"] = matplotlib.pyplot
+
+if excel is not None:
+    _default_pycrust_locals["export_dataframe"] = excel.export_dataframe
 
 _pycrust_intro = """
 MDF Viewer Python Shell
@@ -1231,7 +1244,8 @@ class MDFViewerFrame(wx.Frame):
         export = menu.Append(wx.NewId(), "Export to Excel")
         plot = menu.Append(wx.NewId(), "Plot")
         menu.Bind(wx.EVT_MENU, _show_dag, id=show_dag.Id)
-        menu.Bind(wx.EVT_MENU, _export_to_excel, id=export.Id)
+        if excel is not None:
+            menu.Bind(wx.EVT_MENU, _export_to_excel, id=export.Id)
         menu.Bind(wx.EVT_MENU, _plot, id=plot.Id)
 
         rect = tree.GetBoundingRect(item)

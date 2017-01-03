@@ -79,7 +79,7 @@ Node Factory Functions
 Custom Node Types
 -----------------
 
-.. autofunction:: nodetype(func)
+.. autofunction:: nodetype(func [, method: str] [, node_method: str])
 
 .. _pre_defined_nodes:
 

@@ -1,6 +1,7 @@
 """
 Cython optimizations for context.py
 """
+from cpython.datetime cimport import_datetime, datetime
 from cqueue cimport *
 
 cdef extern from "Python.h":
@@ -21,11 +22,18 @@ ctypedef fused ShiftSetOrDict:
     ShiftSet
     dict
 
+
+cdef inline _profiling_is_enabled():
+    return _profiling_enabled
+
+
 cdef inline tuple _make_shift_key(ShiftSetOrDict shift_set)
+
 
 cdef class ShiftSet(dict):
     cdef dict _shift_keys
     cdef tuple _get_shift_key(self, MDFContext context)
+
 
 cdef class Timer(object):
     cdef object node_or_builder
@@ -38,21 +46,24 @@ cdef class Timer(object):
     cdef inline stop(self, double stop_time)
     cdef inline resume(self)
 
+
 cdef class NodeOrBuilderTimer(object):
     cdef MDFContext ctx
     cdef object node_or_builder
+    cdef object operation
 
     cpdef __enter__(self)
     cpdef __exit__(self, exc_type, exc_value, traceback)
 
-cpdef int _profiling_is_enabled()
 
 cdef class Cookie(object):
     cdef object thread_id
     cdef MDFContext prev_context
 
+
 cdef class NowNodeValue(object):
     cdef object value
+
 
 cdef class MDFNodeBase(object):
     cdef bint _has_set_date_callback
@@ -64,6 +75,8 @@ cdef class MDFNodeBase(object):
     cdef MDFContext get_alt_context(self, MDFContext ctx)
     cdef _add_dependency(self, MDFContext ctx, MDFNodeBase called_node, MDFContext called_ctx)
     cdef get_value(self, MDFContext ctx, thread_id=?)
+    cdef get_all_values(self, MDFContext ctx, thread_id=?)
+    cdef set_all_values(self, MDFContext ctx, values)
 
     #
     # subset of MDFNode API methods used by MDFContext
@@ -76,6 +89,7 @@ cdef class MDFNodeBase(object):
     cpdef set_value(self, MDFContext ctx, value)
     cpdef set_override(self, MDFContext ctx, MDFNodeBase override_node)
 
+
 cdef class MDFContext(object):
     # the two ids are the same, but the object one is only available in c
     # and is an object because it's faster to use that when doing a dict lookup
@@ -83,7 +97,7 @@ cdef class MDFContext(object):
     cdef object _id_obj
 
     cdef int _finalized
-    cdef public object _now
+    cdef public datetime _now
 
     cdef MDFContext _parent
     cdef dict _all_child_contexts
@@ -111,21 +125,33 @@ cdef class MDFContext(object):
     #
     # internal C only methods
     #
-    cdef Timer _start_timer(self, object node)
+    cdef Timer _start_timer(self, node, operation)
     cdef Timer _stop_timer(self)
     cdef MDFNodeBase _get_calling_node(self, MDFContext prev_ctx=?)
     cdef MDFContext _shift(MDFContext self, shift_set, int cache_context=?)
     cdef Cookie _activate(self, MDFContext prev_ctx=?, thread_id=?)
     cdef _deactivate(self, Cookie cookie)
-    cdef _set_date(self, date)
+    cdef _set_date(self, datetime date)
 
     # 
     # semi-public C methods used by MDFNode
     #
     cdef _get_node_value(self, MDFNodeBase node, MDFNodeBase calling_node=?, MDFContext prev_ctx=?, thread_id=?)
+    cdef _get_node_all_values(self, MDFNodeBase node, MDFNodeBase calling_node=?, MDFContext prev_ctx=?, thread_id=?)
     cdef Timer _pause_current_timer(self, double stop_time)
-    cdef object _profile(self, node)
+    cdef object _profile(self, node, operation)
     cpdef object _profile_builder(self, builder)
+
+    #
+    # protected Python methods used by runner
+    #
+    cpdef _set_date_range(self, date_range)
+    cpdef _extend_date_range(self, date_range)
+
+    #
+    # protected methods for use only by nodetypes (and tests)
+    #
+    cpdef _get_all_values(self, MDFNodeBase node)
 
     #
     # public API functions
@@ -138,13 +164,14 @@ cdef class MDFContext(object):
     cpdef dict get_shift_set(self)
     cpdef list get_shifted_contexts(self)
     cpdef iter_shifted_contexts(self)    
-    cpdef set_date(self, date)
-    cpdef get_date(self)
+    cpdef set_date(self, datetime date)
+    cpdef datetime get_date(self)
     cpdef shift(self, shift_set, cache_context=?)
     cpdef ppstats(self)
     cpdef clear(self)
     cpdef is_shift_of(self, MDFContext other)
     cpdef to_dot(self, filename=?, nodes=?, colors=?, all_contexts=?, max_depth=?, rankdir=?)
+
 
 cpdef shift(MDFNodeBase node, MDFNodeBase target=?, values=?, shift_sets=?)
 cpdef MDFContext _get_current_context(thread_id=?)

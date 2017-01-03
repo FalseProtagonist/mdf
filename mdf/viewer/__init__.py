@@ -42,7 +42,10 @@ try:
     from IPython.lib import guisupport, inputhook
 
     if IPython.__version__ >= "0.12":
-        from IPython.kernel.zmq import kernelapp, eventloops
+        if IPython.__version__ >= "5.0.0":
+            from ipykernel import kernelapp, eventloops
+        else:
+            from IPython.kernel.zmq import kernelapp, eventloops
         
     _in_ipython = _ipython_active()
 except ImportError:

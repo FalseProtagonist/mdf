@@ -27,9 +27,20 @@ class DIRTY_FLAGS:
     as dirty (needing to be updated).
     """
     NONE = 0x0
-    ALL  = ~NONE
-    TIME = 0x1
-    ERR = 0x2
+    ALL = ~NONE
+    DATE = 0x1
+    TIME = 0x2
+    DATETIME = DATE | TIME
+    FUTURE_DATA = 0x4
+    ERROR = 0x10
+
+    # if flags match the changed mask then the value may have changed
+    CHANGED_MASK = ~FUTURE_DATA
+
+    # if any of these flags are set the node's iterator/generator is invalid
+    INVALIDATE_GENERATOR = CHANGED_MASK & ~DATETIME
+
+    ALL_FLAGS = ["DATE", "TIME", "FUTURE_DATA", "ERROR"]
 
     @classmethod
     def to_string(cls, mask):
@@ -39,10 +50,8 @@ class DIRTY_FLAGS:
             return "ALL"
 
         result = []
-        for x in dir(cls):
-            if x.upper() == x and x not in ("NONE", "ALL"):
-                flag = getattr(cls, x)
-                if flag & mask:
-                    result.append(x)
+        for x in cls.ALL_FLAGS:
+            flag = getattr(cls, x)
+            if flag & mask:
+                result.append(x)
         return " | ".join(result)
-
